@@ -1,0 +1,57 @@
+# TotalPOS Bridge configuration.
+# Copy to `application.yaml` (same directory as the bridge jar) and edit.
+# The bridge reads this once at startup; restart the service after changes.
+
+server:
+  # Address to bind the REST server to.
+  #   0.0.0.0 = listen on all interfaces (LAN-accessible)
+  #   127.0.0.1 = localhost only (useful if reverse-proxied)
+  host: 0.0.0.0
+  port: 9090
+
+sdk:
+  # Path where the TotalPOS SDK writes its working files (logs, bines cache,
+  # reversos pending, etc.). The SDK appends "/totalpos" internally.
+  # MUST exist and be writable by the bridge process.
+  rutaBase: C:\bridge\sdk-data
+
+  # Pin Pad connection.
+  # For USB/serial: connection is the COM port string (e.g. "COM4").
+  #                 puerto is ignored.
+  # For Wi-Fi:      connection is the PinPad IP (e.g. "192.168.18.212").
+  #                 puerto is the listening port (typically 5000).
+  pinpadConexion: COM4
+  pinpadPuerto: "5000"
+  pinpadTimeOut: "40"
+  pinpadMensaje: BBVA
+  pinpadAndroid: false
+
+  # BBVA host + credentials. Get these from BBVA / E-Global.
+  hostUrl: https://itg.bbvatalam.egltest.egl-cloud.com
+  hostTimeOut: "40"
+  afiliacion: "30027009"
+  monedaAfiliacion: SOLES
+  idAplicacion: bbva_pe.sdk.conexion_bbva
+  claveSecreta: REPLACE_WITH_REAL_SECRET
+
+  # Operator code that appears in receipts / reports.
+  operador: KIOSK01
+
+  # Terminal number on the affiliation. Defaults to "1" for single-terminal
+  # installs. If the merchant has multiple terminals on the same afiliacion,
+  # each kiosk should set a distinct value (e.g., "1", "2", "3").
+  # The SDK validates this at init and refuses to start without it.
+  numeroTerminal: "1"
+
+  # Optional outbound HTTP proxy. Leave blank to disable.
+  urlProxy: ""
+  puertoProxy: ""
+
+  # Whether the SDK should write its own log file at <rutaBase>/totalpos/logs/.
+  # Always leave true for cert audits.
+  logs: true
+
+persistence:
+  # SQLite file path where the bridge stores per-turno transactions for
+  # the `/api/transactions/turno-actual` endpoint and reports.
+  dbFile: C:\bridge\bridge.db

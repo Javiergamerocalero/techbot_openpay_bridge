@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.eglobal</groupId>
+    <artifactId>totalpos-sdk</artifactId>
+    <version>1.1.13</version>
+    <packaging>jar</packaging>
+    <description>BBVA TotalPOS SDK 1.1.13 (vendored locally — supplied by E-Global).</description>
+</project>
