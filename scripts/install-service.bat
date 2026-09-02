@@ -91,6 +91,20 @@ REM Redirect stdout/stderr to log files in BRIDGE_DIR. NSSM rotates them at 10 M
 REM On any non-zero exit, restart after 5 seconds.
 "%NSSM_PATH%" set %SERVICE_NAME% AppRestartDelay 5000
 
+REM Throttle restart loop: if the process exits within 60s of starting,
+REM NSSM waits progressively longer before retrying (5s -> 10s -> 20s...).
+REM This prevents disk saturation and log spam when the bridge fails
+REM deterministically at boot (e.g. corrupt SQLite that self-heal could
+REM not recover, misconfigured PinPad). Without AppThrottle NSSM would
+REM relaunch every AppRestartDelay ms forever.
+"%NSSM_PATH%" set %SERVICE_NAME% AppThrottle 60000
+
+REM Give the JVM up to 5s to shut down gracefully on stop before NSSM
+REM force-terminates it. This reduces the chance that a planned reboot
+REM leaves SQLite mid-write. Doesn't help against power loss (nothing
+REM does), but does help against controlled Windows reboots.
+"%NSSM_PATH%" set %SERVICE_NAME% AppStopMethodConsole 5000
+
 echo.
 echo Service installed. Starting...
 "%NSSM_PATH%" start %SERVICE_NAME%
