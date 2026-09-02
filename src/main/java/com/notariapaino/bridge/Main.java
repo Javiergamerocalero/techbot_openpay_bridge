@@ -49,11 +49,35 @@ public final class Main {
 
         AppConfig cfg = AppConfig.load();
 
-        TransactionDao dao = new TransactionDao(cfg.persistence.dbFile);
-        dao.initSchema();
+        // ─── Phase 0: self-heal any stale state from a previous abrupt
+        // shutdown (power loss, forced reboot). Runs BEFORE opening the DB
+        // and BEFORE talking to the SDK, so that a corrupt SQLite journal
+        // or a stale lock file doesn't send the whole boot into an NSSM
+        // restart loop. See {@link SelfHeal}.
+        SelfHeal.healSqlite(cfg.persistence.dbFile);
 
+        TransactionDao dao;
+        try {
+            dao = SelfHeal.retry("open SQLite + init schema", 3, 2000L, () -> {
+                TransactionDao d = new TransactionDao(cfg.persistence.dbFile);
+                d.initSchema();
+                return d;
+            });
+        } catch (Exception e) {
+            throw new RuntimeException("SQLite init failed after retries: " + e.getMessage(), e);
+        }
+
+        // SDK init can transiently fail right after boot because the USB
+        // stack is still enumerating COM ports for the PinPad, or because
+        // the BBVA host TLS handshake races with the network coming up.
+        // Two attempts with a 3s backoff catches those cases without
+        // masking real config errors (which fail deterministically on both).
         SdkManager sdk = new SdkManager(cfg);
-        sdk.init();
+        try {
+            SelfHeal.retry("init BBVA SDK", 2, 3000L, () -> { sdk.init(); return null; });
+        } catch (Exception e) {
+            throw new RuntimeException("SDK init failed after retries: " + e.getMessage(), e);
+        }
 
         // ─── Controllers ──────────────────────────────────
         HealthController health = new HealthController(sdk, VERSION);
