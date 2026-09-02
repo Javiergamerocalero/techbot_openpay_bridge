@@ -79,9 +79,31 @@ public final class TransactionDao {
                 "CREATE INDEX IF NOT EXISTS idx_transactions_referencia " +
                 "ON transactions(referencia_financiera)"
             );
+            // Migración 2026-09-02: columnas nuevas para poder emitir el
+            // voucher con el mismo layout que devuelve el SDK BBVA
+            // (Javier pidió salir de la plantilla local y usar los datos
+            // tal cual los manda el SDK, incluyendo la razón social real
+            // del comercio, el AID EMV, el App Label y el criptograma).
+            // SQLite no tiene ADD COLUMN IF NOT EXISTS, así que probamos
+            // cada ALTER y absorbemos el error "duplicate column name".
+            addColumnIfMissing(st, "razon_social");
+            addColumnIfMissing(st, "id_aplicacion_tarjeta");
+            addColumnIfMissing(st, "criptograma_tarjeta");
             log.info("SQLite schema ready at {}", jdbcUrl);
         } catch (SQLException e) {
             throw new RuntimeException("Could not initialize SQLite schema", e);
+        }
+    }
+
+    private static void addColumnIfMissing(Statement st, String col) {
+        try {
+            st.executeUpdate("ALTER TABLE transactions ADD COLUMN " + col + " TEXT");
+            log.info("SQLite: added column transactions.{}", col);
+        } catch (SQLException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+            if (!msg.contains("duplicate column")) {
+                log.warn("SQLite: could not add column {}: {}", col, e.getMessage());
+            }
         }
     }
 
@@ -105,8 +127,9 @@ public final class TransactionDao {
                     referencia_financiera, importe, moneda, numero_tarjeta,
                     tarjetahabiente, aplicacion_tarjeta, modo_lectura,
                     codigo_respuesta, leyenda, firma, serie_terminal,
-                    numero_terminal, anulada, created_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    numero_terminal, anulada, created_at,
+                    razon_social, id_aplicacion_tarjeta, criptograma_tarjeta
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """)) {
             ps.setString(1, idTx);
             ps.setString(2, tipo);
@@ -126,6 +149,9 @@ public final class TransactionDao {
             ps.setString(16, r.getNumeroTerminal());
             ps.setInt(17, 0);
             ps.setLong(18, System.currentTimeMillis());
+            ps.setString(19, r.getRazonSocial());
+            ps.setString(20, r.getIdAplicacionTarjeta());
+            ps.setString(21, r.getCriptogramaTarjeta());
             ps.executeUpdate();
         } catch (SQLException e) {
             log.error("persist({}, {}) failed: {}", tipo, idTx, e.getMessage());
@@ -225,6 +251,19 @@ public final class TransactionDao {
         row.put("serieTerminal", rs.getString("serie_terminal"));
         row.put("numeroTerminal", rs.getString("numero_terminal"));
         row.put("anulada", rs.getInt("anulada") == 1);
+        // Campos agregados 2026-09-02 para voucher-desde-SDK. En rows
+        // pre-migración vienen null, el formatter los omite si no están.
+        row.put("razonSocial", getNullableString(rs, "razon_social"));
+        row.put("idAplicacionTarjeta", getNullableString(rs, "id_aplicacion_tarjeta"));
+        row.put("criptogramaTarjeta", getNullableString(rs, "criptograma_tarjeta"));
         return row;
+    }
+
+    private static String getNullableString(ResultSet rs, String col) {
+        try {
+            return rs.getString(col);
+        } catch (SQLException e) {
+            return null;
+        }
     }
 }
