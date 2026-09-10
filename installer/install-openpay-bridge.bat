@@ -14,10 +14,14 @@ set "ROOT=C:\bridge"
 set "RECOVERY_DIR=%ROOT%\recovery"
 set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
+set "NEEDS_CONFIG=0"
+
+REM Resolver NSSM: paquete -> instalacion existente -> PATH.
 set "NSSM=%~dp0nssm.exe"
 if not exist "%NSSM%" if exist "%ROOT%\nssm.exe" set "NSSM=%ROOT%\nssm.exe"
 if not exist "%NSSM%" set "NSSM=nssm.exe"
 
+REM Resolver Java: PATH primero para evitar un JAVA_HOME legacy, luego JAVA_HOME.
 set "JAVA_EXE="
 for /f "delims=" %%i in ('where java 2^>nul') do if not defined JAVA_EXE set "JAVA_EXE=%%i"
 if not defined JAVA_EXE if not "%JAVA_HOME%"=="" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
@@ -28,22 +32,36 @@ if %ERRORLEVEL% neq 0 goto :err_java17
 
 if not exist "%~dp0totalpos-bridge.jar" goto :err_bridge_jar
 if not exist "%~dp0openpay-recovery-service.jar" goto :err_recovery_jar
-if not exist "%~dp0application.yaml" goto :err_bridge_config
-if not exist "%~dp0recovery.properties" goto :err_recovery_config
+if not exist "%~dp0application.yaml.example" goto :err_bridge_example
+if not exist "%~dp0recovery.properties.example" goto :err_recovery_example
 
 if not exist "%ROOT%" mkdir "%ROOT%"
 if not exist "%RECOVERY_DIR%" mkdir "%RECOVERY_DIR%"
+if not exist "%ROOT%\sdk-data" mkdir "%ROOT%\sdk-data"
 
-copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
-copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
-REM No sobrescribir configuraciones existentes durante una actualizacion.
-if not exist "%ROOT%\application.yaml" copy /Y "%~dp0application.yaml" "%ROOT%\application.yaml" >nul
-if not exist "%RECOVERY_DIR%\recovery.properties" copy /Y "%~dp0recovery.properties" "%RECOVERY_DIR%\recovery.properties" >nul
-if exist "%~dp0nssm.exe" copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
-
-REM Reinstalacion controlada de los wrappers NSSM. Los datos/config permanecen.
+REM Detener antes de reemplazar JARs para evitar archivos bloqueados y mezclar versiones.
 "%NSSM%" stop %RECOVERY_SERVICE% >nul 2>&1
 "%NSSM%" stop %BRIDGE_SERVICE% >nul 2>&1
+
+copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
+if %ERRORLEVEL% neq 0 goto :err_copy
+copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
+if %ERRORLEVEL% neq 0 goto :err_copy
+
+REM Preservar configuracion existente en actualizaciones.
+REM En instalacion limpia crearla desde ejemplos y NO arrancar con placeholders.
+if not exist "%ROOT%\application.yaml" (
+    copy /Y "%~dp0application.yaml.example" "%ROOT%\application.yaml" >nul
+    set "NEEDS_CONFIG=1"
+)
+if not exist "%RECOVERY_DIR%\recovery.properties" (
+    copy /Y "%~dp0recovery.properties.example" "%RECOVERY_DIR%\recovery.properties" >nul
+    set "NEEDS_CONFIG=1"
+)
+
+if exist "%~dp0nssm.exe" copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
+
+REM Reinstalacion controlada de wrappers NSSM. Los datos y configuraciones permanecen.
 "%NSSM%" remove %RECOVERY_SERVICE% confirm >nul 2>&1
 "%NSSM%" remove %BRIDGE_SERVICE% confirm >nul 2>&1
 
@@ -51,6 +69,7 @@ REM Reinstalacion controlada de los wrappers NSSM. Los datos/config permanecen.
 if %ERRORLEVEL% neq 0 goto :err_install_bridge
 "%NSSM%" set %BRIDGE_SERVICE% AppDirectory "%ROOT%"
 "%NSSM%" set %BRIDGE_SERVICE% DisplayName "TECHBOT Openpay TotalPOS Bridge"
+"%NSSM%" set %BRIDGE_SERVICE% Description "TECHBOT REST bridge for BBVA TotalPOS/Openpay SDK."
 "%NSSM%" set %BRIDGE_SERVICE% Start SERVICE_AUTO_START
 "%NSSM%" set %BRIDGE_SERVICE% AppStdout "%ROOT%\service.out.log"
 "%NSSM%" set %BRIDGE_SERVICE% AppStderr "%ROOT%\service.err.log"
@@ -64,6 +83,7 @@ if %ERRORLEVEL% neq 0 goto :err_install_bridge
 if %ERRORLEVEL% neq 0 goto :err_install_recovery
 "%NSSM%" set %RECOVERY_SERVICE% AppDirectory "%RECOVERY_DIR%"
 "%NSSM%" set %RECOVERY_SERVICE% DisplayName "TECHBOT Openpay Recovery Service"
+"%NSSM%" set %RECOVERY_SERVICE% Description "TECHBOT controlled recovery API for TotalPosBridge."
 "%NSSM%" set %RECOVERY_SERVICE% Start SERVICE_AUTO_START
 "%NSSM%" set %RECOVERY_SERVICE% AppStdout "%RECOVERY_DIR%\recovery.out.log"
 "%NSSM%" set %RECOVERY_SERVICE% AppStderr "%RECOVERY_DIR%\recovery.err.log"
@@ -73,28 +93,56 @@ if %ERRORLEVEL% neq 0 goto :err_install_recovery
 "%NSSM%" set %RECOVERY_SERVICE% AppThrottle 60000
 "%NSSM%" set %RECOVERY_SERVICE% AppStopMethodConsole 5000
 
-REM La regla LAN de 9092 se crea en una etapa posterior cuando se conozca
-REM la IP/subred autorizada del kiosco. No abrir 9092 globalmente.
+REM No abrir 9092 globalmente. La regla LAN se agregara despues con IP/subred autorizada.
 
+if "%NEEDS_CONFIG%"=="1" goto :fresh_config_required
+
+REM Actualizacion / reinstalacion con configuracion existente: arrancar y validar.
 "%NSSM%" start %BRIDGE_SERVICE%
-timeout /t 5 /nobreak >nul
+timeout /t 6 /nobreak >nul
 "%NSSM%" start %RECOVERY_SERVICE%
 timeout /t 3 /nobreak >nul
 
 echo.
 echo ============================================================
-echo TECHBOT Openpay Bridge instalado.
+echo TECHBOT Openpay Bridge instalado/actualizado.
 echo Bridge:   http://127.0.0.1:9091/api/health
 echo Recovery: http://127.0.0.1:9092/health
 echo ============================================================
 echo.
-curl -s http://127.0.0.1:9091/api/health
+echo [Bridge health]
+curl -s --max-time 5 http://127.0.0.1:9091/api/health
 echo.
-curl -s http://127.0.0.1:9092/health
+echo [Recovery health]
+curl -s --max-time 5 http://127.0.0.1:9092/health
+echo.
 echo.
 echo NOTA: antes de produccion, restringir TCP 9092 a la IP/subred del kiosco.
 endlocal
 exit /b 0
+
+:fresh_config_required
+echo.
+echo ============================================================
+echo Instalacion preparada, pero es una instalacion LIMPIA.
+echo Los servicios NO se han iniciado porque se crearon configuraciones
+necho de ejemplo que contienen placeholders.
+echo.
+echo Edite:
+echo   %ROOT%\application.yaml
+echo   %RECOVERY_DIR%\recovery.properties
+echo.
+echo Requisitos minimos:
+echo   - Bridge en puerto 9091.
+echo   - Recovery apuntando a http://127.0.0.1:9091/api/health.
+echo   - apiKey real de al menos 24 caracteres, distinta de CHANGE_ME.
+echo   - Credenciales/COM del comercio correctamente configurados.
+echo.
+echo Luego vuelva a ejecutar este instalador. La segunda ejecucion
+necho preservara ambos archivos y arrancara los servicios.
+echo ============================================================
+endlocal
+exit /b 2
 
 :err_admin
 echo ERROR: ejecutar este instalador como Administrador.
@@ -111,11 +159,14 @@ goto :fail
 :err_recovery_jar
 echo ERROR: falta openpay-recovery-service.jar junto al instalador.
 goto :fail
-:err_bridge_config
-echo ERROR: falta application.yaml junto al instalador.
+:err_bridge_example
+echo ERROR: falta application.yaml.example junto al instalador.
 goto :fail
-:err_recovery_config
-echo ERROR: falta recovery.properties junto al instalador.
+:err_recovery_example
+echo ERROR: falta recovery.properties.example junto al instalador.
+goto :fail
+:err_copy
+echo ERROR: no se pudieron copiar los binarios a C:\bridge.
 goto :fail
 :err_install_bridge
 echo ERROR: no se pudo instalar TotalPosBridge.
