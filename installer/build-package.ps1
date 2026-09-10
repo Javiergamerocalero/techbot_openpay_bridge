@@ -71,6 +71,7 @@ $RecoveryExample = Join-Path $RepoRoot "recovery\recovery.properties.example"
 $InstallBat = Join-Path $InstallerDir "install-openpay-bridge.bat"
 $UpdateBat = Join-Path $InstallerDir "update-openpay-bridge.bat"
 $UninstallBat = Join-Path $InstallerDir "uninstall-openpay-bridge.bat"
+$VerifyPs1 = Join-Path $InstallerDir "verify-installation.ps1"
 $Readme = Join-Path $InstallerDir "README.md"
 
 Require-File $BridgeJar "TotalPosBridge JAR"
@@ -80,6 +81,7 @@ Require-File $RecoveryExample "recovery.properties.example"
 Require-File $InstallBat "install-openpay-bridge.bat"
 Require-File $UpdateBat "update-openpay-bridge.bat"
 Require-File $UninstallBat "uninstall-openpay-bridge.bat"
+Require-File $VerifyPs1 "verify-installation.ps1"
 Require-File $Readme "README.md"
 
 Write-Host "[3/6] Resolviendo NSSM..."
@@ -97,6 +99,7 @@ Copy-Item $RecoveryExample (Join-Path $StageDir "recovery.properties.example")
 Copy-Item $InstallBat $StageDir
 Copy-Item $UpdateBat $StageDir
 Copy-Item $UninstallBat $StageDir
+Copy-Item $VerifyPs1 $StageDir
 Copy-Item $Readme $StageDir
 Copy-Item $ResolvedNssm (Join-Path $StageDir "nssm.exe")
 
