@@ -33,6 +33,7 @@ if not exist "%~dp0totalpos-bridge.jar" goto :err_bridge_jar
 if not exist "%~dp0openpay-recovery-service.jar" goto :err_recovery_jar
 if not exist "%~dp0application.yaml.example" goto :err_bridge_example
 if not exist "%~dp0recovery.properties.example" goto :err_recovery_example
+if not exist "%~dp0verify-installation.ps1" goto :err_verify_script
 
 if not exist "%ROOT%" mkdir "%ROOT%"
 if not exist "%RECOVERY_DIR%" mkdir "%RECOVERY_DIR%"
@@ -104,24 +105,18 @@ if %ERRORLEVEL% neq 0 goto :err_install_recovery
 
 REM No abrir 9092 globalmente. Firewall se restringira por IP/subred del kiosco.
 "%NSSM%" start %BRIDGE_SERVICE%
-timeout /t 6 /nobreak >nul
+timeout /t 2 /nobreak >nul
 "%NSSM%" start %RECOVERY_SERVICE%
-timeout /t 3 /nobreak >nul
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-installation.ps1" -TimeoutSeconds 35
+if %ERRORLEVEL% neq 0 goto :err_health
 
 echo.
 echo ============================================================
-echo TECHBOT Openpay Bridge instalado/actualizado.
+echo TECHBOT Openpay Bridge instalado/actualizado y saludable.
 echo Bridge:   http://127.0.0.1:9091/api/health
 echo Recovery: http://127.0.0.1:9092/health
 echo ============================================================
-echo.
-echo [Bridge health]
-curl -s --max-time 5 http://127.0.0.1:9091/api/health
-echo.
-echo [Recovery health]
-curl -s --max-time 5 http://127.0.0.1:9092/health
-echo.
-echo.
 echo Binarios previos, si existian:
 echo   %ROOT%\totalpos-bridge.previous.jar
 echo   %RECOVERY_DIR%\openpay-recovery-service.previous.jar
@@ -139,7 +134,7 @@ echo   %ROOT%\application.yaml
 echo   %RECOVERY_DIR%\recovery.properties
 echo.
 echo Configure puerto 9091, credenciales/COM y una apiKey real de al menos
-necho 24 caracteres distinta de CHANGE_ME. Luego ejecute nuevamente este instalador.
+echo 24 caracteres distinta de CHANGE_ME. Luego ejecute nuevamente este instalador.
 echo ============================================================
 endlocal
 exit /b 2
@@ -174,6 +169,9 @@ goto :fail
 :err_recovery_example
 echo ERROR: falta recovery.properties.example junto al instalador.
 goto :fail
+:err_verify_script
+echo ERROR: falta verify-installation.ps1 junto al instalador.
+goto :fail
 :err_copy
 echo ERROR: no se pudieron copiar los binarios a C:\bridge.
 goto :fail
@@ -182,6 +180,10 @@ echo ERROR: no se pudo instalar TotalPosBridge.
 goto :fail
 :err_install_recovery
 echo ERROR: no se pudo instalar TechbotOpenpayRecovery.
+goto :fail
+:err_health
+echo ERROR: los servicios fueron instalados pero la validacion funcional fallo.
+echo Revise C:\bridge\service.out.log, C:\bridge\service.err.log y los logs de recovery.
 goto :fail
 :fail
 endlocal
