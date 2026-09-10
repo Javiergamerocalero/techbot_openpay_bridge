@@ -23,6 +23,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Standalone recovery API for the Windows TotalPosBridge service.
@@ -45,6 +47,9 @@ public final class RecoveryMain {
      * archivo podria reiniciar cualquier servicio de la maquina.
      */
     private static final String TOTALPOS_SERVICE = "TotalPosBridge";
+    private static final int SERVICE_STOPPED = 1;
+    private static final int SERVICE_RUNNING = 4;
+    private static final Pattern SC_STATE_LINE = Pattern.compile("^\\s*[^:]+:\\s*([1-7])(?:\\s|$).*$");
     private static final AtomicBoolean recoveryInProgress = new AtomicBoolean(false);
     private static final AtomicLong lastRestartEpochMs = new AtomicLong(0);
 
@@ -231,24 +236,28 @@ public final class RecoveryMain {
             log("WARN", "Stop returned non-zero: " + stop.message);
         }
 
-        waitForServiceState("STOPPED", config.serviceStopWaitSeconds);
+        waitForServiceState(SERVICE_STOPPED, config.serviceStopWaitSeconds);
 
         ServiceResult start = runFixedCommand("sc.exe", "start", TOTALPOS_SERVICE);
         if (!start.ok) {
             return start;
         }
 
-        if (!waitForServiceState("RUNNING", config.serviceStartWaitSeconds)) {
+        if (!waitForServiceState(SERVICE_RUNNING, config.serviceStartWaitSeconds)) {
             return new ServiceResult(false, "service_did_not_reach_RUNNING");
         }
         return new ServiceResult(true, "service_running");
     }
 
-    private boolean waitForServiceState(String expected, int seconds) {
+    /**
+     * Wait for a Windows SCM state using its numeric state code instead of the
+     * localized label emitted by sc.exe (for example STATE vs ESTADO).
+     */
+    private boolean waitForServiceState(int expectedStateCode, int seconds) {
         long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(seconds);
         while (System.currentTimeMillis() < deadline) {
             ServiceResult result = runFixedCommand("sc.exe", "query", TOTALPOS_SERVICE);
-            if (result.message.contains("STATE") && result.message.contains(expected)) {
+            if (result.ok && extractServiceStateCode(result.message) == expectedStateCode) {
                 return true;
             }
             try {
@@ -259,6 +268,25 @@ public final class RecoveryMain {
             }
         }
         return false;
+    }
+
+    /**
+     * sc.exe keeps the numeric SCM state code stable across Windows languages:
+     * 1=STOPPED, 2=START_PENDING, 3=STOP_PENDING, 4=RUNNING, etc.
+     * Other numeric fields in sc.exe output are 0 or >=10, so the first line
+     * whose value is 1..7 is the service-state line regardless of its label.
+     */
+    private static int extractServiceStateCode(String output) {
+        if (output == null || output.isBlank()) {
+            return -1;
+        }
+        for (String line : output.split("\\R")) {
+            Matcher matcher = SC_STATE_LINE.matcher(line);
+            if (matcher.matches()) {
+                return Integer.parseInt(matcher.group(1));
+            }
+        }
+        return -1;
     }
 
     private ServiceResult runFixedCommand(String... command) {
@@ -347,7 +375,7 @@ public final class RecoveryMain {
     }
 
     private static final class Config {
-        static final String DEFAULT_BRIDGE_HEALTH_URL = "http://127.0.0.1:9090/api/health";
+        static final String DEFAULT_BRIDGE_HEALTH_URL = "http://127.0.0.1:9091/api/health";
 
         final String bindAddress;
         final int port;
