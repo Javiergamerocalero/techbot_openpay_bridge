@@ -20,6 +20,8 @@ REM Resolver NSSM: paquete -> instalacion existente -> PATH.
 set "NSSM=%~dp0nssm.exe"
 if not exist "%NSSM%" if exist "%ROOT%\nssm.exe" set "NSSM=%ROOT%\nssm.exe"
 if not exist "%NSSM%" set "NSSM=nssm.exe"
+"%NSSM%" --version >nul 2>&1
+if %ERRORLEVEL% neq 0 goto :err_nssm
 
 REM Resolver Java: PATH primero para evitar un JAVA_HOME legacy, luego JAVA_HOME.
 set "JAVA_EXE="
@@ -126,7 +128,7 @@ echo.
 echo ============================================================
 echo Instalacion preparada, pero es una instalacion LIMPIA.
 echo Los servicios NO se han iniciado porque se crearon configuraciones
-necho de ejemplo que contienen placeholders.
+echo de ejemplo que contienen placeholders.
 echo.
 echo Edite:
 echo   %ROOT%\application.yaml
@@ -139,13 +141,16 @@ echo   - apiKey real de al menos 24 caracteres, distinta de CHANGE_ME.
 echo   - Credenciales/COM del comercio correctamente configurados.
 echo.
 echo Luego vuelva a ejecutar este instalador. La segunda ejecucion
-necho preservara ambos archivos y arrancara los servicios.
+echo preservara ambos archivos y arrancara los servicios.
 echo ============================================================
 endlocal
 exit /b 2
 
 :err_admin
 echo ERROR: ejecutar este instalador como Administrador.
+goto :fail
+:err_nssm
+echo ERROR: no se encontro una copia funcional de nssm.exe.
 goto :fail
 :err_java
 echo ERROR: no se encontro Java.
