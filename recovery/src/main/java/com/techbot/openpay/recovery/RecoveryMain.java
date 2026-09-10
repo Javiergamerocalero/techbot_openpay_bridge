@@ -38,6 +38,13 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class RecoveryMain {
 
     private static final String VERSION = "1.0.0";
+
+    /**
+     * Unico servicio Windows que este proceso puede tocar. Va fijo en el codigo
+     * a proposito: si saliera de la configuracion, quien pudiera editar el
+     * archivo podria reiniciar cualquier servicio de la maquina.
+     */
+    private static final String TOTALPOS_SERVICE = "TotalPosBridge";
     private static final AtomicBoolean recoveryInProgress = new AtomicBoolean(false);
     private static final AtomicLong lastRestartEpochMs = new AtomicLong(0);
 
@@ -69,7 +76,7 @@ public final class RecoveryMain {
         log("INFO", "TECHBOT Openpay Recovery Service v" + VERSION
                 + " listening on " + config.bindAddress + ":" + config.port
                 + "; bridge=" + config.bridgeHealthUrl
-                + "; service=" + config.windowsServiceName);
+                + "; service=" + TOTALPOS_SERVICE);
     }
 
     private final class HealthHandler implements HttpHandler {
@@ -136,6 +143,10 @@ public final class RecoveryMain {
                 }
 
                 log("WARN", "Bridge unhealthy; starting controlled recovery. reason=" + before.reason);
+                // El enfriamiento se marca ANTES de intentar, no despues de acertar:
+                // si el reinicio falla y no se marcara, un servicio roto se podria
+                // reintentar en bucle, que es justo lo que el enfriamiento evita.
+                lastRestartEpochMs.set(System.currentTimeMillis());
                 ServiceResult restart = restartWindowsService();
                 if (!restart.ok) {
                     log("ERROR", "Service restart failed: " + restart.message);
@@ -144,7 +155,6 @@ public final class RecoveryMain {
                     return;
                 }
 
-                lastRestartEpochMs.set(System.currentTimeMillis());
                 BridgeHealth after = waitUntilHealthy();
                 long duration = System.currentTimeMillis() - started;
 
@@ -214,7 +224,7 @@ public final class RecoveryMain {
     }
 
     private ServiceResult restartWindowsService() {
-        ServiceResult stop = runFixedCommand("sc.exe", "stop", config.windowsServiceName);
+        ServiceResult stop = runFixedCommand("sc.exe", "stop", TOTALPOS_SERVICE);
         if (!stop.ok && !stop.message.toLowerCase(Locale.ROOT).contains("not started")
                 && !stop.message.contains("1062")) {
             // A stopped service is acceptable; any other stop error is relevant.
@@ -223,7 +233,7 @@ public final class RecoveryMain {
 
         waitForServiceState("STOPPED", config.serviceStopWaitSeconds);
 
-        ServiceResult start = runFixedCommand("sc.exe", "start", config.windowsServiceName);
+        ServiceResult start = runFixedCommand("sc.exe", "start", TOTALPOS_SERVICE);
         if (!start.ok) {
             return start;
         }
@@ -237,7 +247,7 @@ public final class RecoveryMain {
     private boolean waitForServiceState(String expected, int seconds) {
         long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(seconds);
         while (System.currentTimeMillis() < deadline) {
-            ServiceResult result = runFixedCommand("sc.exe", "query", config.windowsServiceName);
+            ServiceResult result = runFixedCommand("sc.exe", "query", TOTALPOS_SERVICE);
             if (result.message.contains("STATE") && result.message.contains(expected)) {
                 return true;
             }
@@ -337,11 +347,12 @@ public final class RecoveryMain {
     }
 
     private static final class Config {
+        static final String DEFAULT_BRIDGE_HEALTH_URL = "http://127.0.0.1:9090/api/health";
+
         final String bindAddress;
         final int port;
         final String apiKey;
         final String bridgeHealthUrl;
-        final String windowsServiceName;
         final int bridgeConnectTimeoutMs;
         final int bridgeReadTimeoutMs;
         final int restartCooldownSeconds;
@@ -355,8 +366,7 @@ public final class RecoveryMain {
             bindAddress = p.getProperty("bindAddress", "0.0.0.0").trim();
             port = Integer.parseInt(p.getProperty("port", "9092"));
             apiKey = requireSecureApiKey(p.getProperty("apiKey", ""));
-            bridgeHealthUrl = p.getProperty("bridgeHealthUrl", "http://127.0.0.1:9090/api/health").trim();
-            windowsServiceName = p.getProperty("windowsServiceName", "TotalPosBridge").trim();
+            bridgeHealthUrl = requireLoopback(p.getProperty("bridgeHealthUrl", DEFAULT_BRIDGE_HEALTH_URL).trim());
             bridgeConnectTimeoutMs = Integer.parseInt(p.getProperty("bridgeConnectTimeoutMs", "1500"));
             bridgeReadTimeoutMs = Integer.parseInt(p.getProperty("bridgeReadTimeoutMs", "3000"));
             restartCooldownSeconds = Integer.parseInt(p.getProperty("restartCooldownSeconds", "120"));
@@ -377,6 +387,20 @@ public final class RecoveryMain {
                 p.load(in);
             }
             return new Config(p);
+        }
+
+        /**
+         * El bridge corre en la misma maquina. Aceptar un host remoto convertiria
+         * este servicio en un sondeador de equipos ajenos.
+         */
+        private static String requireLoopback(String value) {
+            URI uri = URI.create(value);
+            String host = uri.getHost();
+            if (host == null || !(host.equals("127.0.0.1") || host.equals("localhost") || host.equals("::1"))) {
+                throw new IllegalArgumentException(
+                        "bridgeHealthUrl must point to this machine (127.0.0.1 or localhost)");
+            }
+            return value;
         }
 
         private static String requireSecureApiKey(String value) {
