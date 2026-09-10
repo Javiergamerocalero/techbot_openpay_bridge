@@ -14,7 +14,7 @@ apiKey=CHANGE_ME
 
 # Endpoint de salud del TotalPOS Bridge. Solo se admiten direcciones de la
 # propia maquina: apuntar a otro equipo hace que el servicio no arranque.
-bridgeHealthUrl=http://127.0.0.1:9090/api/health
+bridgeHealthUrl=http://127.0.0.1:9091/api/health
 
 # El servicio Windows que se reinicia es siempre TotalPosBridge y va fijo en
 # el codigo a proposito. No es configurable: si lo fuera, quien pudiera editar
