@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  */
 public final class RecoveryMain {
 
-    private static final String VERSION = "1.0.0";
+    private static final String VERSION = "1.0.1";
 
     /**
      * Unico servicio Windows que este proceso puede tocar. Va fijo en el codigo
@@ -276,7 +276,7 @@ public final class RecoveryMain {
      * Other numeric fields in sc.exe output are 0 or >=10, so the first line
      * whose value is 1..7 is the service-state line regardless of its label.
      */
-    private static int extractServiceStateCode(String output) {
+    static int extractServiceStateCode(String output) {
         if (output == null || output.isBlank()) {
             return -1;
         }

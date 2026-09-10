@@ -10,7 +10,7 @@
 $ErrorActionPreference = 'Stop'
 
 $recoveryDir = Split-Path -Parent $PSScriptRoot
-$version = '1.0.0'
+$version = '1.0.1'
 $nombre = "TechbotOpenpayRecovery-v$version"
 $dist = Join-Path $recoveryDir 'dist'
 $staging = Join-Path $dist $nombre
