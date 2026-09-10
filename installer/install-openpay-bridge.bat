@@ -15,25 +15,17 @@ set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
 set "NEEDS_CONFIG=0"
 
-REM Resolver NSSM de forma robusta. Probar cada candidato funcionalmente.
+REM Resolver NSSM sin usar "nssm version" como prueba de exito.
+REM NSSM 2.24 muestra la version/ayuda pero puede devolver ERRORLEVEL distinto de 0,
+REM lo que producia falsos negativos con un binario perfectamente valido.
+set "NSSM=%~dp0nssm.exe"
+if exist "%NSSM%" goto :nssm_ready
+set "NSSM=%ROOT%\nssm.exe"
+if exist "%NSSM%" goto :nssm_ready
 set "NSSM="
-if exist "%~dp0nssm.exe" (
-    "%~dp0nssm.exe" version >nul 2>&1
-    if %ERRORLEVEL% equ 0 set "NSSM=%~dp0nssm.exe"
-)
-if not defined NSSM if exist "%ROOT%\nssm.exe" (
-    "%ROOT%\nssm.exe" version >nul 2>&1
-    if %ERRORLEVEL% equ 0 set "NSSM=%ROOT%\nssm.exe"
-)
-if not defined NSSM (
-    for /f "delims=" %%i in ('where nssm.exe 2^>nul') do (
-        if not defined NSSM (
-            "%%i" version >nul 2>&1
-            if %ERRORLEVEL% equ 0 set "NSSM=%%i"
-        )
-    )
-)
+for /f "delims=" %%i in ('where nssm.exe 2^>nul') do if not defined NSSM set "NSSM=%%i"
 if not defined NSSM goto :err_nssm
+:nssm_ready
 
 set "JAVA_EXE="
 for /f "delims=" %%i in ('where java 2^>nul') do if not defined JAVA_EXE set "JAVA_EXE=%%i"
@@ -83,10 +75,7 @@ copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
 if %ERRORLEVEL% neq 0 goto :err_copy
 copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
 if %ERRORLEVEL% neq 0 goto :err_copy
-if exist "%~dp0nssm.exe" (
-    "%~dp0nssm.exe" version >nul 2>&1
-    if %ERRORLEVEL% equ 0 copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
-)
+if exist "%~dp0nssm.exe" copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
 
 REM Reinstalacion idempotente de wrappers NSSM. Configuraciones y datos permanecen.
 "%NSSM%" remove %RECOVERY_SERVICE% confirm >nul 2>&1
@@ -166,8 +155,7 @@ exit /b 2
 echo ERROR: ejecutar este instalador como Administrador.
 goto :fail
 :err_nssm
-echo ERROR: no se encontro una copia funcional de nssm.exe.
-echo El instalador probo la copia del paquete, C:\bridge\nssm.exe y PATH.
+echo ERROR: no se encontro nssm.exe en el paquete, C:\bridge o PATH.
 goto :fail
 :err_java
 echo ERROR: no se encontro Java.
