@@ -15,11 +15,25 @@ set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
 set "NEEDS_CONFIG=0"
 
-set "NSSM=%~dp0nssm.exe"
-if not exist "%NSSM%" if exist "%ROOT%\nssm.exe" set "NSSM=%ROOT%\nssm.exe"
-if not exist "%NSSM%" set "NSSM=nssm.exe"
-"%NSSM%" version >nul 2>&1
-if %ERRORLEVEL% neq 0 goto :err_nssm
+REM Resolver NSSM de forma robusta. Probar cada candidato funcionalmente.
+set "NSSM="
+if exist "%~dp0nssm.exe" (
+    "%~dp0nssm.exe" version >nul 2>&1
+    if %ERRORLEVEL% equ 0 set "NSSM=%~dp0nssm.exe"
+)
+if not defined NSSM if exist "%ROOT%\nssm.exe" (
+    "%ROOT%\nssm.exe" version >nul 2>&1
+    if %ERRORLEVEL% equ 0 set "NSSM=%ROOT%\nssm.exe"
+)
+if not defined NSSM (
+    for /f "delims=" %%i in ('where nssm.exe 2^>nul') do (
+        if not defined NSSM (
+            "%%i" version >nul 2>&1
+            if %ERRORLEVEL% equ 0 set "NSSM=%%i"
+        )
+    )
+)
+if not defined NSSM goto :err_nssm
 
 set "JAVA_EXE="
 for /f "delims=" %%i in ('where java 2^>nul') do if not defined JAVA_EXE set "JAVA_EXE=%%i"
@@ -69,7 +83,10 @@ copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
 if %ERRORLEVEL% neq 0 goto :err_copy
 copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
 if %ERRORLEVEL% neq 0 goto :err_copy
-if exist "%~dp0nssm.exe" copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
+if exist "%~dp0nssm.exe" (
+    "%~dp0nssm.exe" version >nul 2>&1
+    if %ERRORLEVEL% equ 0 copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
+)
 
 REM Reinstalacion idempotente de wrappers NSSM. Configuraciones y datos permanecen.
 "%NSSM%" remove %RECOVERY_SERVICE% confirm >nul 2>&1
@@ -150,6 +167,7 @@ echo ERROR: ejecutar este instalador como Administrador.
 goto :fail
 :err_nssm
 echo ERROR: no se encontro una copia funcional de nssm.exe.
+echo El instalador probo la copia del paquete, C:\bridge\nssm.exe y PATH.
 goto :fail
 :err_java
 echo ERROR: no se encontro Java.
