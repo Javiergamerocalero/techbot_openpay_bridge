@@ -1,0 +1,56 @@
+name: Build Openpay Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/openpay-recovery-service-v1
+    paths:
+      - 'pom.xml'
+      - 'src/**'
+      - 'libs/**'
+      - 'libs-repo/**'
+      - 'application.yaml.example'
+      - 'recovery/**'
+      - 'installer/**'
+      - '.github/workflows/build-openpay-installer.yml'
+
+jobs:
+  build-package:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Install NSSM
+        shell: powershell
+        run: choco install nssm -y --no-progress
+
+      - name: Build unified package
+        shell: powershell
+        run: |
+          $nssm = (Get-Command nssm.exe).Source
+          .\installer\build-package.ps1 -Version 1.0.0 -NssmPath $nssm
+
+      - name: Show package hash
+        shell: powershell
+        run: Get-Content .\dist\TECHBOT-Openpay-Bridge-1.0.0.zip.sha256.txt
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TECHBOT-Openpay-Bridge-1.0.0
+          path: |
+            dist/TECHBOT-Openpay-Bridge-1.0.0.zip
+            dist/TECHBOT-Openpay-Bridge-1.0.0.zip.sha256.txt
+          if-no-files-found: error
