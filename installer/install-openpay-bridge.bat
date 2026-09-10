@@ -2,10 +2,9 @@
 setlocal EnableExtensions
 
 REM TECHBOT Openpay Bridge - instalador unificado Windows
-REM Instala/configura dos servicios independientes:
+REM Servicios independientes:
 REM   TotalPosBridge
 REM   TechbotOpenpayRecovery
-REM Ejecutar como Administrador desde el paquete de distribucion.
 
 net session >nul 2>&1
 if %ERRORLEVEL% neq 0 goto :err_admin
@@ -16,14 +15,12 @@ set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
 set "NEEDS_CONFIG=0"
 
-REM Resolver NSSM: paquete -> instalacion existente -> PATH.
 set "NSSM=%~dp0nssm.exe"
 if not exist "%NSSM%" if exist "%ROOT%\nssm.exe" set "NSSM=%ROOT%\nssm.exe"
 if not exist "%NSSM%" set "NSSM=nssm.exe"
-"%NSSM%" --version >nul 2>&1
+"%NSSM%" version >nul 2>&1
 if %ERRORLEVEL% neq 0 goto :err_nssm
 
-REM Resolver Java: PATH primero para evitar un JAVA_HOME legacy, luego JAVA_HOME.
 set "JAVA_EXE="
 for /f "delims=" %%i in ('where java 2^>nul') do if not defined JAVA_EXE set "JAVA_EXE=%%i"
 if not defined JAVA_EXE if not "%JAVA_HOME%"=="" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
@@ -41,17 +38,7 @@ if not exist "%ROOT%" mkdir "%ROOT%"
 if not exist "%RECOVERY_DIR%" mkdir "%RECOVERY_DIR%"
 if not exist "%ROOT%\sdk-data" mkdir "%ROOT%\sdk-data"
 
-REM Detener antes de reemplazar JARs para evitar archivos bloqueados y mezclar versiones.
-"%NSSM%" stop %RECOVERY_SERVICE% >nul 2>&1
-"%NSSM%" stop %BRIDGE_SERVICE% >nul 2>&1
-
-copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
-if %ERRORLEVEL% neq 0 goto :err_copy
-copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
-if %ERRORLEVEL% neq 0 goto :err_copy
-
-REM Preservar configuracion existente en actualizaciones.
-REM En instalacion limpia crearla desde ejemplos y NO arrancar con placeholders.
+REM Preparar configuracion en instalacion limpia, sin instalar/arrancar servicios todavia.
 if not exist "%ROOT%\application.yaml" (
     copy /Y "%~dp0application.yaml.example" "%ROOT%\application.yaml" >nul
     set "NEEDS_CONFIG=1"
@@ -61,9 +48,29 @@ if not exist "%RECOVERY_DIR%\recovery.properties" (
     set "NEEDS_CONFIG=1"
 )
 
+if "%NEEDS_CONFIG%"=="1" goto :fresh_config_required
+
+REM Rechazar placeholders aunque los archivos ya existan.
+findstr /C:"REPLACE_WITH_REAL_SECRET" "%ROOT%\application.yaml" >nul 2>&1
+if %ERRORLEVEL% equ 0 goto :config_placeholder
+findstr /C:"apiKey=CHANGE_ME" "%RECOVERY_DIR%\recovery.properties" >nul 2>&1
+if %ERRORLEVEL% equ 0 goto :config_placeholder
+
+REM Detener antes de reemplazar JARs.
+"%NSSM%" stop %RECOVERY_SERVICE% >nul 2>&1
+"%NSSM%" stop %BRIDGE_SERVICE% >nul 2>&1
+
+REM Conservar copia de los binarios anteriores para rollback manual.
+if exist "%ROOT%\totalpos-bridge.jar" copy /Y "%ROOT%\totalpos-bridge.jar" "%ROOT%\totalpos-bridge.previous.jar" >nul
+if exist "%RECOVERY_DIR%\openpay-recovery-service.jar" copy /Y "%RECOVERY_DIR%\openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.previous.jar" >nul
+
+copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
+if %ERRORLEVEL% neq 0 goto :err_copy
+copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
+if %ERRORLEVEL% neq 0 goto :err_copy
 if exist "%~dp0nssm.exe" copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
 
-REM Reinstalacion controlada de wrappers NSSM. Los datos y configuraciones permanecen.
+REM Reinstalacion idempotente de wrappers NSSM. Configuraciones y datos permanecen.
 "%NSSM%" remove %RECOVERY_SERVICE% confirm >nul 2>&1
 "%NSSM%" remove %BRIDGE_SERVICE% confirm >nul 2>&1
 
@@ -95,11 +102,7 @@ if %ERRORLEVEL% neq 0 goto :err_install_recovery
 "%NSSM%" set %RECOVERY_SERVICE% AppThrottle 60000
 "%NSSM%" set %RECOVERY_SERVICE% AppStopMethodConsole 5000
 
-REM No abrir 9092 globalmente. La regla LAN se agregara despues con IP/subred autorizada.
-
-if "%NEEDS_CONFIG%"=="1" goto :fresh_config_required
-
-REM Actualizacion / reinstalacion con configuracion existente: arrancar y validar.
+REM No abrir 9092 globalmente. Firewall se restringira por IP/subred del kiosco.
 "%NSSM%" start %BRIDGE_SERVICE%
 timeout /t 6 /nobreak >nul
 "%NSSM%" start %RECOVERY_SERVICE%
@@ -119,6 +122,10 @@ echo [Recovery health]
 curl -s --max-time 5 http://127.0.0.1:9092/health
 echo.
 echo.
+echo Binarios previos, si existian:
+echo   %ROOT%\totalpos-bridge.previous.jar
+echo   %RECOVERY_DIR%\openpay-recovery-service.previous.jar
+echo.
 echo NOTA: antes de produccion, restringir TCP 9092 a la IP/subred del kiosco.
 endlocal
 exit /b 0
@@ -126,23 +133,20 @@ exit /b 0
 :fresh_config_required
 echo.
 echo ============================================================
-echo Instalacion preparada, pero es una instalacion LIMPIA.
-echo Los servicios NO se han iniciado porque se crearon configuraciones
-echo de ejemplo que contienen placeholders.
-echo.
+echo Instalacion limpia preparada. NO se instalaron ni iniciaron servicios.
 echo Edite:
 echo   %ROOT%\application.yaml
 echo   %RECOVERY_DIR%\recovery.properties
 echo.
-echo Requisitos minimos:
-echo   - Bridge en puerto 9091.
-echo   - Recovery apuntando a http://127.0.0.1:9091/api/health.
-echo   - apiKey real de al menos 24 caracteres, distinta de CHANGE_ME.
-echo   - Credenciales/COM del comercio correctamente configurados.
-echo.
-echo Luego vuelva a ejecutar este instalador. La segunda ejecucion
-echo preservara ambos archivos y arrancara los servicios.
+echo Configure puerto 9091, credenciales/COM y una apiKey real de al menos
+necho 24 caracteres distinta de CHANGE_ME. Luego ejecute nuevamente este instalador.
 echo ============================================================
+endlocal
+exit /b 2
+
+:config_placeholder
+echo ERROR: las configuraciones aun contienen placeholders.
+echo Revise C:\bridge\application.yaml y C:\bridge\recovery\recovery.properties.
 endlocal
 exit /b 2
 
