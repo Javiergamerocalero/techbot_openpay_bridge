@@ -1,0 +1,25 @@
+# TECHBOT Openpay Recovery Service
+# Copy to C:\bridge\recovery\recovery.properties before installation.
+
+# Listen on LAN so the Android kiosk can reach the mini-PC.
+# Restrict port 9092 in Windows Firewall to the kiosk IP/subnet.
+bindAddress=0.0.0.0
+port=9092
+
+# Mandatory shared key. Use at least 24 random characters.
+# Android sends it in X-Techbot-Recovery-Key for /openpay/status and /openpay/recover.
+apiKey=CHANGE_ME
+
+# Existing TotalPOS Bridge health endpoint.
+bridgeHealthUrl=http://127.0.0.1:9090/api/health
+windowsServiceName=TotalPosBridge
+
+# Conservative defaults for a local LAN/localhost environment.
+bridgeConnectTimeoutMs=1500
+bridgeReadTimeoutMs=3000
+restartCooldownSeconds=120
+recoveryWaitSeconds=30
+healthPollIntervalMs=1000
+commandTimeoutSeconds=10
+serviceStopWaitSeconds=10
+serviceStartWaitSeconds=15
