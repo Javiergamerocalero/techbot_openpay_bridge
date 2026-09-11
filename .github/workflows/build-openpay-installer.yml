@@ -1,0 +1,68 @@
+name: Build Openpay Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/openpay-recovery-service-v1
+    paths:
+      - 'pom.xml'
+      - 'src/**'
+      - 'libs/**'
+      - 'libs-repo/**'
+      - 'application.yaml.example'
+      - 'recovery/**'
+      - 'installer/**'
+      - '.github/workflows/build-openpay-installer.yml'
+
+jobs:
+  build-package:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Install NSSM
+        shell: powershell
+        run: choco install nssm -y --no-progress
+
+      - name: Build unified package
+        shell: powershell
+        run: |
+          $candidates = @(
+            'C:\ProgramData\chocolatey\lib\nssm\tools\nssm-2.24\win64\nssm.exe',
+            'C:\ProgramData\chocolatey\lib\nssm\tools\nssm-2.24\win32\nssm.exe'
+          )
+          $nssm = $candidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $nssm) {
+            $nssm = Get-ChildItem 'C:\ProgramData\chocolatey\lib\nssm' -Filter nssm.exe -Recurse -File |
+              Where-Object { $_.FullName -notlike '*\bin\nssm.exe' } |
+              Sort-Object { if ($_.FullName -match 'win64') { 0 } else { 1 } } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $nssm) { throw 'No se encontro el binario real de NSSM instalado por Chocolatey.' }
+          Write-Host "NSSM real seleccionado: $nssm"
+          .\installer\build-package.ps1 -Version 1.0.2 -NssmPath $nssm
+
+      - name: Show package hash
+        shell: powershell
+        run: Get-Content .\dist\TECHBOT-Openpay-Bridge-1.0.2.zip.sha256.txt
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TECHBOT-Openpay-Bridge-1.0.2
+          path: |
+            dist/TECHBOT-Openpay-Bridge-1.0.2.zip
+            dist/TECHBOT-Openpay-Bridge-1.0.2.zip.sha256.txt
+          if-no-files-found: error

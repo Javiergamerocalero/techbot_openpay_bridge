@@ -7,7 +7,7 @@ server:
   #   0.0.0.0 = listen on all interfaces (LAN-accessible)
   #   127.0.0.1 = localhost only (useful if reverse-proxied)
   host: 0.0.0.0
-  port: 9090
+  port: 9091
 
 sdk:
   # Path where the TotalPOS SDK writes its working files (logs, bines cache,
