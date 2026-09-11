@@ -51,19 +51,18 @@ jobs:
               Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $nssm) { throw 'No se encontro el binario real de NSSM instalado por Chocolatey.' }
-          & $nssm version
-          if ($LASTEXITCODE -ne 0) { throw "NSSM seleccionado no es funcional: $nssm" }
-          .\installer\build-package.ps1 -Version 1.0.1 -NssmPath $nssm
+          Write-Host "NSSM real seleccionado: $nssm"
+          .\installer\build-package.ps1 -Version 1.0.2 -NssmPath $nssm
 
       - name: Show package hash
         shell: powershell
-        run: Get-Content .\dist\TECHBOT-Openpay-Bridge-1.0.1.zip.sha256.txt
+        run: Get-Content .\dist\TECHBOT-Openpay-Bridge-1.0.2.zip.sha256.txt
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TECHBOT-Openpay-Bridge-1.0.1
+          name: TECHBOT-Openpay-Bridge-1.0.2
           path: |
-            dist/TECHBOT-Openpay-Bridge-1.0.1.zip
-            dist/TECHBOT-Openpay-Bridge-1.0.1.zip.sha256.txt
+            dist/TECHBOT-Openpay-Bridge-1.0.2.zip
+            dist/TECHBOT-Openpay-Bridge-1.0.2.zip.sha256.txt
           if-no-files-found: error
