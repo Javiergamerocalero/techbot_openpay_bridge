@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  */
 public final class RecoveryMain {
 
-    private static final String VERSION = "1.0.1";
+    private static final String VERSION = "1.0.2";
 
     /**
      * Unico servicio Windows que este proceso puede tocar. Va fijo en el codigo
@@ -244,7 +244,17 @@ public final class RecoveryMain {
         }
 
         if (!waitForServiceState(SERVICE_RUNNING, config.serviceStartWaitSeconds)) {
-            return new ServiceResult(false, "service_did_not_reach_RUNNING");
+            // SCM state is diagnostic only. NSSM can already have launched the
+            // Bridge while sc.exe state observation is delayed or unreliable.
+            // Functional readiness is decided below by /api/health, which also
+            // proves that the TotalPOS SDK initialized successfully.
+            BridgeHealth health = checkBridgeHealth();
+            if (health.healthy) {
+                log("WARN", "SCM RUNNING state was not observed, but Bridge health is OK; continuing recovery.");
+                return new ServiceResult(true, "bridge_healthy_scm_state_not_observed");
+            }
+            log("WARN", "SCM RUNNING state was not observed; continuing with bounded functional health polling.");
+            return new ServiceResult(true, "service_state_unconfirmed");
         }
         return new ServiceResult(true, "service_running");
     }
