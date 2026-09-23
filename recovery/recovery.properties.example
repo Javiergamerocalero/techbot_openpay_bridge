@@ -35,3 +35,9 @@ healthPollIntervalMs=1000
 commandTimeoutSeconds=10
 serviceStopWaitSeconds=10
 serviceStartWaitSeconds=15
+
+# Autorecuperacion unica al arrancar Recovery. No es un watchdog periodico.
+# Tras el periodo de gracia, Recovery comprueba una sola vez /api/health.
+# Si Bridge sigue no saludable, ejecuta un unico intento de recuperacion.
+startupSelfCheckEnabled=true
+startupGraceSeconds=60

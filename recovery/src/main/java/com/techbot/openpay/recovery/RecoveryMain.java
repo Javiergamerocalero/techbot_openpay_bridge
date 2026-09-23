@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  */
 public final class RecoveryMain {
 
-    private static final String VERSION = "1.0.2";
+    private static final String VERSION = "1.0.3";
 
     /**
      * Unico servicio Windows que este proceso puede tocar. Va fijo en el codigo
@@ -78,10 +78,74 @@ public final class RecoveryMain {
         server.setExecutor(Executors.newFixedThreadPool(4));
         server.start();
 
+        scheduleStartupSelfCheck();
+
         log("INFO", "TECHBOT Openpay Recovery Service v" + VERSION
                 + " listening on " + config.bindAddress + ":" + config.port
                 + "; bridge=" + config.bridgeHealthUrl
                 + "; service=" + TOTALPOS_SERVICE);
+    }
+
+    /**
+     * One-shot startup self-check. This is intentionally not a watchdog:
+     * after the configured grace period it checks Bridge health once and,
+     * only if unhealthy, performs one controlled recovery attempt.
+     */
+    private void scheduleStartupSelfCheck() {
+        if (!config.startupSelfCheckEnabled) {
+            log("INFO", "Startup self-check disabled");
+            return;
+        }
+        Thread worker = new Thread(() -> {
+            try {
+                log("INFO", "Startup self-check scheduled in " + config.startupGraceSeconds + "s");
+                TimeUnit.SECONDS.sleep(config.startupGraceSeconds);
+                BridgeHealth health = checkBridgeHealth();
+                if (health.healthy) {
+                    log("INFO", "Startup self-check: Bridge already healthy; no action required");
+                    return;
+                }
+                log("WARN", "Startup self-check: Bridge unhealthy; attempting one controlled recovery. reason=" + health.reason);
+                performStartupRecovery();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log("WARN", "Startup self-check interrupted");
+            } catch (Exception e) {
+                log("ERROR", "Startup self-check failed: " + e.getClass().getSimpleName() + ":" + e.getMessage());
+            }
+        }, "openpay-startup-selfcheck");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void performStartupRecovery() {
+        if (!recoveryInProgress.compareAndSet(false, true)) {
+            log("WARN", "Startup self-check skipped: another recovery is already in progress");
+            return;
+        }
+        long started = System.currentTimeMillis();
+        try {
+            BridgeHealth before = checkBridgeHealth();
+            if (before.healthy) {
+                log("INFO", "Startup recovery skipped: Bridge became healthy");
+                return;
+            }
+            lastRestartEpochMs.set(System.currentTimeMillis());
+            ServiceResult restart = restartWindowsService();
+            if (!restart.ok) {
+                log("ERROR", "Startup recovery service restart failed: " + restart.message);
+                return;
+            }
+            BridgeHealth after = waitUntilHealthy();
+            long duration = System.currentTimeMillis() - started;
+            if (after.healthy) {
+                log("INFO", "Startup recovery successful in " + duration + "ms");
+            } else {
+                log("ERROR", "Bridge still unhealthy after startup recovery. reason=" + after.reason);
+            }
+        } finally {
+            recoveryInProgress.set(false);
+        }
     }
 
     private final class HealthHandler implements HttpHandler {
@@ -399,6 +463,8 @@ public final class RecoveryMain {
         final int commandTimeoutSeconds;
         final int serviceStopWaitSeconds;
         final int serviceStartWaitSeconds;
+        final boolean startupSelfCheckEnabled;
+        final int startupGraceSeconds;
 
         private Config(Properties p) {
             bindAddress = p.getProperty("bindAddress", "0.0.0.0").trim();
@@ -413,6 +479,11 @@ public final class RecoveryMain {
             commandTimeoutSeconds = Integer.parseInt(p.getProperty("commandTimeoutSeconds", "10"));
             serviceStopWaitSeconds = Integer.parseInt(p.getProperty("serviceStopWaitSeconds", "10"));
             serviceStartWaitSeconds = Integer.parseInt(p.getProperty("serviceStartWaitSeconds", "15"));
+            startupSelfCheckEnabled = Boolean.parseBoolean(p.getProperty("startupSelfCheckEnabled", "true"));
+            startupGraceSeconds = Integer.parseInt(p.getProperty("startupGraceSeconds", "60"));
+            if (startupGraceSeconds < 10) {
+                throw new IllegalArgumentException("startupGraceSeconds must be at least 10");
+            }
         }
 
         static Config load() throws IOException {
