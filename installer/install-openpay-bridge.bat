@@ -14,11 +14,13 @@ set "RECOVERY_DIR=%ROOT%\recovery"
 set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
 set "NEEDS_CONFIG=0"
+set "PACKAGE_DIR=%~dp0"
+set "STABLE_NSSM=%ROOT%\nssm.exe"
 
 REM Resolver NSSM sin usar "nssm version" como prueba de exito.
 REM NSSM 2.24 muestra la version/ayuda pero puede devolver ERRORLEVEL distinto de 0,
 REM lo que producia falsos negativos con un binario perfectamente valido.
-set "NSSM=%~dp0nssm.exe"
+set "NSSM=%PACKAGE_DIR%nssm.exe"
 if exist "%NSSM%" goto :nssm_ready
 set "NSSM=%ROOT%\nssm.exe"
 if exist "%NSSM%" goto :nssm_ready
@@ -26,6 +28,15 @@ set "NSSM="
 for /f "delims=" %%i in ('where nssm.exe 2^>nul') do if not defined NSSM set "NSSM=%%i"
 if not defined NSSM goto :err_nssm
 :nssm_ready
+
+REM Persistir NSSM antes de registrar servicios. Los wrappers deben depender
+REM solo de C:\bridge y no de Descargas, USB u otra carpeta temporal.
+if /I not "%NSSM%"=="%STABLE_NSSM%" (
+    copy /Y "%NSSM%" "%STABLE_NSSM%" >nul
+    if %ERRORLEVEL% neq 0 goto :err_copy_nssm
+)
+set "NSSM=%STABLE_NSSM%"
+if not exist "%NSSM%" goto :err_copy_nssm
 
 set "JAVA_EXE="
 for /f "delims=" %%i in ('where java 2^>nul') do if not defined JAVA_EXE set "JAVA_EXE=%%i"
@@ -63,19 +74,29 @@ if %ERRORLEVEL% equ 0 goto :config_placeholder
 findstr /C:"apiKey=CHANGE_ME" "%RECOVERY_DIR%\recovery.properties" >nul 2>&1
 if %ERRORLEVEL% equ 0 goto :config_placeholder
 
+REM Detectar si los JARs fuente ya son exactamente los instalados. Esto permite
+REM ejecutar el actualizador desde C:\bridge sin copiar archivos sobre si mismos.
+set "COPY_BRIDGE=1"
+set "COPY_RECOVERY=1"
+for %%A in ("%PACKAGE_DIR%totalpos-bridge.jar") do for %%B in ("%ROOT%\totalpos-bridge.jar") do if /I "%%~fA"=="%%~fB" set "COPY_BRIDGE=0"
+for %%A in ("%PACKAGE_DIR%openpay-recovery-service.jar") do for %%B in ("%RECOVERY_DIR%\openpay-recovery-service.jar") do if /I "%%~fA"=="%%~fB" set "COPY_RECOVERY=0"
+
 REM Detener antes de reemplazar JARs.
 "%NSSM%" stop %RECOVERY_SERVICE% >nul 2>&1
 "%NSSM%" stop %BRIDGE_SERVICE% >nul 2>&1
 
-REM Conservar copia de los binarios anteriores para rollback manual.
-if exist "%ROOT%\totalpos-bridge.jar" copy /Y "%ROOT%\totalpos-bridge.jar" "%ROOT%\totalpos-bridge.previous.jar" >nul
-if exist "%RECOVERY_DIR%\openpay-recovery-service.jar" copy /Y "%RECOVERY_DIR%\openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.previous.jar" >nul
+REM Conservar copia solo cuando existe un binario distinto que sera reemplazado.
+if "%COPY_BRIDGE%"=="1" if exist "%ROOT%\totalpos-bridge.jar" copy /Y "%ROOT%\totalpos-bridge.jar" "%ROOT%\totalpos-bridge.previous.jar" >nul
+if "%COPY_RECOVERY%"=="1" if exist "%RECOVERY_DIR%\openpay-recovery-service.jar" copy /Y "%RECOVERY_DIR%\openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.previous.jar" >nul
 
-copy /Y "%~dp0totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
-if %ERRORLEVEL% neq 0 goto :err_copy
-copy /Y "%~dp0openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
-if %ERRORLEVEL% neq 0 goto :err_copy
-if exist "%~dp0nssm.exe" copy /Y "%~dp0nssm.exe" "%ROOT%\nssm.exe" >nul
+if "%COPY_BRIDGE%"=="1" (
+    copy /Y "%PACKAGE_DIR%totalpos-bridge.jar" "%ROOT%\totalpos-bridge.jar" >nul
+    if %ERRORLEVEL% neq 0 goto :err_copy
+)
+if "%COPY_RECOVERY%"=="1" (
+    copy /Y "%PACKAGE_DIR%openpay-recovery-service.jar" "%RECOVERY_DIR%\openpay-recovery-service.jar" >nul
+    if %ERRORLEVEL% neq 0 goto :err_copy
+)
 
 REM Reinstalacion idempotente de wrappers NSSM. Configuraciones y datos permanecen.
 "%NSSM%" remove %RECOVERY_SERVICE% confirm >nul 2>&1
@@ -156,6 +177,9 @@ echo ERROR: ejecutar este instalador como Administrador.
 goto :fail
 :err_nssm
 echo ERROR: no se encontro nssm.exe en el paquete, C:\bridge o PATH.
+goto :fail
+:err_copy_nssm
+echo ERROR: no se pudo persistir nssm.exe en C:\bridge.
 goto :fail
 :err_java
 echo ERROR: no se encontro Java.
