@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/openpay-recovery-service-v1
+      - feature/recovery-startup-selfcheck-v1
     paths:
       - 'pom.xml'
       - 'src/**'
