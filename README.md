@@ -156,6 +156,88 @@ La recuperación es **reactiva/on-demand**, no un watchdog periódico. Incluye e
 
 Recovery no debe utilizarse para reiniciar el Bridge ante rechazos comerciales o errores arbitrarios de pago.
 
+## Integración recomendada desde la aplicación de quiosco
+
+La aplicación cliente debe utilizar el Bridge de forma **reactiva**. No se recomienda ejecutar `/api/health` antes de cada venta, ya que agrega una llamada adicional a todas las operaciones normales sin aportar valor cuando el Bridge está funcionando correctamente.
+
+### Flujo normal
+
+La aplicación debe intentar la operación directamente contra el Bridge:
+
+```text
+POST /api/venta
+      |
+      +-- Respuesta HTTP recibida --> procesar normalmente
+      |
+      +-- Error de comunicación / timeout --> diagnosticar Bridge
+```
+
+Mientras el Bridge responda normalmente, no es necesario consultar Recovery ni ejecutar health checks adicionales.
+
+### Cuándo diagnosticar y disparar Recovery
+
+Ante un **error de comunicación** con el Bridge (por ejemplo, conexión rechazada, pérdida de conexión o timeout), la aplicación debe consultar:
+
+```text
+GET http://<IP_NUC>:9091/api/health
+```
+
+El Bridge se considera saludable únicamente si responde **HTTP 200** y el JSON contiene:
+
+```json
+{
+  "status": "OK",
+  "sdkInitialized": true
+}
+```
+
+Si el health check no responde, produce timeout/error de conexión, devuelve un HTTP diferente de 200, `status != "OK"` o `sdkInitialized != true`, la aplicación puede solicitar recuperación mediante:
+
+```http
+POST http://<IP_NUC>:9092/openpay/recover
+X-Techbot-Recovery-Key: <RECOVERY_KEY>
+```
+
+Después de una recuperación exitosa, debe verificarse nuevamente `/api/health` antes de considerar disponible el medio de pago.
+
+### Regla crítica después de iniciar una venta
+
+Un timeout o pérdida de comunicación **después de enviar `POST /api/venta` no significa necesariamente que la venta haya fallado**. La operación puede haber llegado a TotalPOS/Openpay y haber sido procesada aunque la aplicación no haya recibido la respuesta.
+
+Por lo tanto:
+
+```text
+POST /api/venta
+      |
+      +-- respuesta recibida --> procesar resultado
+      |
+      +-- timeout / comunicación perdida
+              |
+              +--> GET /api/health
+                      |
+                      +-- Bridge saludable --> NO ejecutar Recovery
+                      |                      conciliar/consultar la operación
+                      |
+                      +-- Bridge no saludable --> Recovery puede restaurar
+                                                 la disponibilidad del Bridge
+                                                 PERO NO repetir la venta
+```
+
+**Nunca ejecutar automáticamente una segunda `POST /api/venta` después de Recovery cuando la primera solicitud pudo haber sido enviada.** Primero debe determinarse el estado de la operación original mediante los mecanismos de consulta/conciliación disponibles.
+
+Esta separación evita dobles cobros y permite que Recovery resuelva exclusivamente la indisponibilidad técnica del Bridge.
+
+### Resumen para implementadores
+
+- No hacer health check antes de cada venta.
+- Operar normalmente contra el Bridge mientras responda.
+- Ante un problema de comunicación, usar `/api/health` como diagnóstico.
+- Disparar `/openpay/recover` únicamente cuando el Bridge no esté saludable.
+- Recovery restaura disponibilidad; **no determina si una venta incierta debe repetirse**.
+- Si una venta ya fue enviada y se pierde su respuesta, marcarla como pendiente de consulta/conciliación.
+- No reintentar automáticamente una venta cuyo resultado sea incierto.
+- No disparar Recovery por rechazos comerciales o errores de negocio devueltos normalmente por el Bridge.
+
 ## Endpoints del Bridge
 
 | Método | Ruta | Descripción |
