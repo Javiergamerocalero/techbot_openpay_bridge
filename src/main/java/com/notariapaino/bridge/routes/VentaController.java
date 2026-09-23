@@ -25,40 +25,16 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Sale endpoints: card sale ({@code POST /api/venta}) and QR sale
- * ({@code POST /api/venta-qr}).
- *
- * <p>Both call the SDK's {@code Peticion.autorizar()} with the appropriate
- * {@code OPERACION} enum and surface the SDK's {@code Respuesta} as a
- * {@link RespuestaDto}. Errors map to {@link ApiError}:
- *
- * <ul>
- *   <li>400 — bad request body (importe missing / malformed).</li>
- *   <li>409 — {@code PinPadKeysException}: PinPad needs key loading first.</li>
- *   <li>502 — {@code PeticionException}: host/PinPad communication failure.</li>
- *   <li>500 — any other unexpected error.</li>
- * </ul>
- *
- * <p>The QR endpoint adds a companion cancel route
- * ({@code POST /api/venta-qr/cancelar}) that the kiosk can call when the
- * operator hits "Cancelar" on the UI before the customer scans the QR.
- * Maps to {@code Peticion.finalizarOperacionQR()} per SDK manual page 31.
- */
+/** Sale endpoints for card and QR payments. */
 public final class VentaController {
 
     private static final Logger log = LoggerFactory.getLogger(VentaController.class);
     private static final ThreadLocal<SimpleDateFormat> DATE_FMT =
             ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyyMMddHHmmss"));
+    private static final int CUOTAS_PCI_TOPE = 12;
 
     private final SdkManager sdk;
     private final TransactionDao dao;
-
-    /**
-     * Tracks the currently-in-flight QR Peticion so {@code /cancelar} can
-     * call {@code finalizarOperacionQR()} on the right instance. Only one
-     * QR can be in flight at a time on a single PinPad.
-     */
     private volatile Peticion currentQrPeticion;
 
     public VentaController(SdkManager sdk, TransactionDao dao) {
@@ -83,29 +59,24 @@ public final class VentaController {
                 }
 
                 try {
-                    // `new Peticion()` itself declares throws PeticionException —
-                    // keep inside the try so we never have an unreported
-                    // exception path.
                     Peticion p = new Peticion();
                     p.setOperador(sdk.operador());
                     p.setFecha(DATE_FMT.get().format(new Date()));
                     p.setOperacion(OPERACION.VENTA, parametros);
 
-                    // Cuotas / PSI flow: the SDK manual (pages 32-33) requires
-                    // reading the card first to know whether the promo applies,
-                    // then calling setPromocionMeses before autorizar.
+                    // Preserve the newer explicit-request contract, while also
+                    // restoring the production 1.1.9 automatic promotion flow
+                    // when the kiosk did not request installments explicitly.
                     if (req.hasInstallments()) {
                         Tarjeta tarjeta = p.leerTarjeta();
                         PROMOCION promo = req.isSinIntereses()
                                 ? PROMOCION.MESES_SIN_INTERESES
                                 : PROMOCION.MESES_CON_INTERESES;
-                        // For PSI, only offer if the host indicated it via getMaxCuotasPsi() > 0.
-                        // For regular installments, host signals via isCuotasPci(). We
-                        // trust the caller (Flutter UI) to have already filtered; if the
-                        // card doesn't support the promo, the host will reject downstream.
                         p.setPromocionMeses(promo, req.cuotas());
-                        log.info("VENTA installments: cuotas={}, promo={}, productoTarjeta={}",
+                        log.info("VENTA installments explicit: cuotas={}, promo={}, productoTarjeta={}",
                                 req.cuotas(), promo, tarjeta == null ? "?" : tarjeta.getProducto());
+                    } else {
+                        habilitarPromocionSiAplica(p);
                     }
 
                     Respuesta resp = p.autorizar();
@@ -114,9 +85,6 @@ public final class VentaController {
                     String voucherText = null;
                     if ("00".equals(resp.getCodigoRespuesta())) {
                         dao.persist("VENTA", resp);
-                        // Build the printable voucher inline so the kiosk gets
-                        // it in the same response (no extra round-trip). The
-                        // MW's printer service is what actually prints it.
                         Map<String, Object> tx = dao.findByIdTransaccion(resp.getIdTransaccion());
                         if (tx != null) {
                             voucherText = VoucherFormatter.build(tx, sdk.operador(), null);
@@ -140,6 +108,40 @@ public final class VentaController {
         };
     }
 
+    /**
+     * Production behavior recovered from Bridge 1.1.9.
+     * Credit cards are inspected before authorization. PSI uses the maximum
+     * number of interest-free installments reported by the card/host; PCI
+     * falls back to the 12-installment ceiling used in production.
+     */
+    private void habilitarPromocionSiAplica(Peticion p) throws PeticionException {
+        Tarjeta tarjeta = p.leerTarjeta();
+        if (tarjeta == null) {
+            log.warn("VENTA leerTarjeta returned null; continuing without promotion");
+            return;
+        }
+
+        String producto = tarjeta.getProducto();
+        int maxCuotasPsi = tarjeta.getMaxCuotasPsi();
+        boolean cuotasPci = tarjeta.isCuotasPci();
+        log.info("VENTA card promotion probe: producto={}, maxCuotasPsi={}, cuotasPci={}",
+                producto, maxCuotasPsi, cuotasPci);
+
+        if (!"C".equalsIgnoreCase(producto)) {
+            return;
+        }
+
+        if (maxCuotasPsi > 0) {
+            p.setPromocionMeses(PROMOCION.MESES_SIN_INTERESES, maxCuotasPsi);
+            log.info("VENTA automatic promotion: PSI {} cuotas", maxCuotasPsi);
+        } else if (cuotasPci) {
+            p.setPromocionMeses(PROMOCION.MESES_CON_INTERESES, CUOTAS_PCI_TOPE);
+            log.info("VENTA automatic promotion: PCI {} cuotas", CUOTAS_PCI_TOPE);
+        } else {
+            log.info("VENTA credit card without installment promotion; continuing as regular sale");
+        }
+    }
+
     public Handler ventaQR() {
         return new Handler() {
             @Override
@@ -157,7 +159,6 @@ public final class VentaController {
                 }
 
                 try {
-                    // `new Peticion()` itself declares throws PeticionException.
                     Peticion p = new Peticion();
                     p.setOperador(sdk.operador());
                     p.setFecha(DATE_FMT.get().format(new Date()));
@@ -178,9 +179,6 @@ public final class VentaController {
                     ctx.status(200).json(RespuestaDto.from(resp, voucherText));
 
                 } catch (PeticionException e) {
-                    // Code "99" = QR session timed out without payment; mandatory
-                    // to call consultar afterwards per the manual page 31 to avoid
-                    // double charging. Surface as 502 with a hint in the message.
                     log.warn("VENTA_QR failed: {}", e.getMessage());
                     ctx.status(502).json(ApiError.of("PeticionException", e.getMessage()));
                 } catch (Exception e) {

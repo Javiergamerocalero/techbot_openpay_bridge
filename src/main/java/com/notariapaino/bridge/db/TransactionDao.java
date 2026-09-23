@@ -15,26 +15,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * SQLite-backed persistence of approved transactions for the current shift.
  *
  * <p>The bridge stores every approved operation (ventas, anulaciones, carga
- * de llaves) here so the kiosk Flutter app can list them via
- * {@code GET /api/transactions/turno-actual} without needing to hit the
- * BBVA host every time the operator opens the anulaciones screen.
- *
- * <p>This is a local cache, NOT the source of truth for accounting —
- * BBVA's host is. We persist a subset of the SDK {@code Respuesta} fields
- * sufficient for the kiosk to display transactions and trigger anulaciones
- * (we need {@code referenciaFinanciera}). The {@code Reporteria} endpoints
- * still query the host for the audit reports.
- *
- * <p>On cierre de turno we clear the table — the SDK + host hold the
- * historical record, the bridge only cares about the live shift.
- *
- * <p>Schema is created on first connection via {@link #initSchema()}; safe
- * to call repeatedly because of {@code IF NOT EXISTS}.
+ * de llaves) here so the kiosk can list them without querying the BBVA host.
+ * The host remains the source of truth for accounting.
  */
 public final class TransactionDao {
 
@@ -65,12 +54,20 @@ public final class TransactionDao {
                     numero_tarjeta TEXT,
                     tarjetahabiente TEXT,
                     aplicacion_tarjeta TEXT,
+                    id_aplicacion_tarjeta TEXT,
+                    criptograma_tarjeta TEXT,
                     modo_lectura TEXT,
                     codigo_respuesta TEXT,
                     leyenda TEXT,
                     firma TEXT,
                     serie_terminal TEXT,
                     numero_terminal TEXT,
+                    razon_social TEXT,
+                    direccion TEXT,
+                    cuotas TEXT,
+                    codigo_promocion TEXT,
+                    monto_cuota TEXT,
+                    mensajes_promocion TEXT,
                     anulada INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL
                 )
@@ -79,25 +76,25 @@ public final class TransactionDao {
                 "CREATE INDEX IF NOT EXISTS idx_transactions_referencia " +
                 "ON transactions(referencia_financiera)"
             );
-            // Migración 2026-09-02: columnas nuevas para poder emitir el
-            // voucher con el mismo layout que devuelve el SDK BBVA
-            // (Javier pidió salir de la plantilla local y usar los datos
-            // tal cual los manda el SDK, incluyendo la razón social real
-            // del comercio, el AID EMV, el App Label y el criptograma).
-            // SQLite no tiene ADD COLUMN IF NOT EXISTS, así que probamos
-            // cada ALTER y absorbemos el error "duplicate column name".
-            addColumnIfMissing(st, "razon_social");
-            addColumnIfMissing(st, "id_aplicacion_tarjeta");
-            addColumnIfMissing(st, "criptograma_tarjeta");
+
+            // Idempotent migrations for databases created by older Bridge releases.
+            addColumnIfMissing(st, "id_aplicacion_tarjeta", "TEXT");
+            addColumnIfMissing(st, "criptograma_tarjeta", "TEXT");
+            addColumnIfMissing(st, "razon_social", "TEXT");
+            addColumnIfMissing(st, "direccion", "TEXT");
+            addColumnIfMissing(st, "cuotas", "TEXT");
+            addColumnIfMissing(st, "codigo_promocion", "TEXT");
+            addColumnIfMissing(st, "monto_cuota", "TEXT");
+            addColumnIfMissing(st, "mensajes_promocion", "TEXT");
             log.info("SQLite schema ready at {}", jdbcUrl);
         } catch (SQLException e) {
             throw new RuntimeException("Could not initialize SQLite schema", e);
         }
     }
 
-    private static void addColumnIfMissing(Statement st, String col) {
+    private static void addColumnIfMissing(Statement st, String col, String type) {
         try {
-            st.executeUpdate("ALTER TABLE transactions ADD COLUMN " + col + " TEXT");
+            st.executeUpdate("ALTER TABLE transactions ADD COLUMN " + col + " " + type);
             log.info("SQLite: added column transactions.{}", col);
         } catch (SQLException e) {
             String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
@@ -107,13 +104,7 @@ public final class TransactionDao {
         }
     }
 
-    /**
-     * Persist an approved transaction. {@code tipo} is the operation kind
-     * ({@code VENTA}, {@code VENTA_QR}, {@code ANULACION_VENTA_TARJETA},
-     * {@code ANULACION_VENTA_QR}). Idempotent on {@code idTransaccion}:
-     * a second insert with the same id is silently ignored (the SDK can
-     * occasionally hand us the same response twice during retries).
-     */
+    /** Persist an approved transaction. Idempotent on idTransaccion. */
     public void persist(String tipo, Respuesta r) {
         String idTx = r.getIdTransaccion();
         if (idTx == null || idTx.isBlank()) {
@@ -125,11 +116,12 @@ public final class TransactionDao {
                 INSERT OR IGNORE INTO transactions (
                     id_transaccion, tipo, fecha_hora, autorizacion,
                     referencia_financiera, importe, moneda, numero_tarjeta,
-                    tarjetahabiente, aplicacion_tarjeta, modo_lectura,
-                    codigo_respuesta, leyenda, firma, serie_terminal,
-                    numero_terminal, anulada, created_at,
-                    razon_social, id_aplicacion_tarjeta, criptograma_tarjeta
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    tarjetahabiente, aplicacion_tarjeta, id_aplicacion_tarjeta,
+                    criptograma_tarjeta, modo_lectura, codigo_respuesta,
+                    leyenda, firma, serie_terminal, numero_terminal,
+                    razon_social, direccion, cuotas, codigo_promocion,
+                    monto_cuota, mensajes_promocion, anulada, created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """)) {
             ps.setString(1, idTx);
             ps.setString(2, tipo);
@@ -141,28 +133,37 @@ public final class TransactionDao {
             ps.setString(8, r.getNumeroTarjeta());
             ps.setString(9, r.getTarjetahabiente());
             ps.setString(10, r.getAplicacionTarjeta());
-            ps.setString(11, r.getModoLectura());
-            ps.setString(12, r.getCodigoRespuesta());
-            ps.setString(13, r.getLeyenda());
-            ps.setString(14, r.getFirma() == null ? null : r.getFirma().name());
-            ps.setString(15, r.getSerieTerminal());
-            ps.setString(16, r.getNumeroTerminal());
-            ps.setInt(17, 0);
-            ps.setLong(18, System.currentTimeMillis());
+            ps.setString(11, r.getIdAplicacionTarjeta());
+            ps.setString(12, r.getCriptogramaTarjeta());
+            ps.setString(13, r.getModoLectura());
+            ps.setString(14, r.getCodigoRespuesta());
+            ps.setString(15, r.getLeyenda());
+            ps.setString(16, r.getFirma() == null ? null : r.getFirma().name());
+            ps.setString(17, r.getSerieTerminal());
+            ps.setString(18, r.getNumeroTerminal());
             ps.setString(19, r.getRazonSocial());
-            ps.setString(20, r.getIdAplicacionTarjeta());
-            ps.setString(21, r.getCriptogramaTarjeta());
+            ps.setString(20, r.getDireccion());
+            ps.setString(21, r.getCuotas());
+            ps.setString(22, r.getCodigoPromocion() == null ? null : r.getCodigoPromocion().name());
+            ps.setString(23, r.getMontoCuota());
+            ps.setString(24, joinMensajes(r.getMensajes()));
+            ps.setInt(25, 0);
+            ps.setLong(26, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
             log.error("persist({}, {}) failed: {}", tipo, idTx, e.getMessage());
         }
     }
 
-    /**
-     * Mark the original sale identified by {@code referenciaFinanciera} as
-     * anulada. Called after a successful anulación so the kiosk Anulaciones
-     * screen greys it out and prevents re-anulación.
-     */
+    private static String joinMensajes(String[] mensajes) {
+        if (mensajes == null || mensajes.length == 0) return null;
+        String joined = Stream.of(mensajes)
+                .filter(m -> m != null && !m.isBlank())
+                .map(String::trim)
+                .collect(Collectors.joining(" | "));
+        return joined.isBlank() ? null : joined;
+    }
+
     public void markAnuladaByReferencia(String referenciaFinanciera) {
         if (referenciaFinanciera == null || referenciaFinanciera.isBlank()) return;
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
@@ -176,7 +177,6 @@ public final class TransactionDao {
         }
     }
 
-    /** Drop every transaction. Called after a successful cierre de turno. */
     public void clearShift() {
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
              Statement st = conn.createStatement()) {
@@ -187,13 +187,6 @@ public final class TransactionDao {
         }
     }
 
-    /**
-     * Look up a single transaction by its SDK-assigned UUID. Used by the
-     * voucher reprint endpoint to rebuild the printable text from cached
-     * fields when the kiosk asks to reprint an old sale.
-     *
-     * @return the row as a flat map, or {@code null} if no match.
-     */
     public Map<String, Object> findByIdTransaccion(String idTx) {
         if (idTx == null || idTx.isBlank()) return null;
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
@@ -201,9 +194,7 @@ public final class TransactionDao {
                  "SELECT * FROM transactions WHERE id_transaccion = ?")) {
             ps.setString(1, idTx);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rowToMap(rs);
-                }
+                if (rs.next()) return rowToMap(rs);
             }
         } catch (SQLException e) {
             log.error("findByIdTransaccion({}) failed: {}", idTx, e.getMessage());
@@ -211,27 +202,19 @@ public final class TransactionDao {
         return null;
     }
 
-    /**
-     * Return every transaction in the current shift, oldest first. Each row
-     * is a flat {@code Map<String,Object>} that Jackson serializes directly
-     * into the response body of {@code GET /api/transactions/turno-actual}.
-     */
     public List<Map<String, Object>> listCurrentShift() {
         List<Map<String, Object>> out = new ArrayList<>();
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
              PreparedStatement ps = conn.prepareStatement(
                  "SELECT * FROM transactions ORDER BY created_at ASC");
              ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                out.add(rowToMap(rs));
-            }
+            while (rs.next()) out.add(rowToMap(rs));
         } catch (SQLException e) {
             log.error("listCurrentShift failed: {}", e.getMessage());
         }
         return out;
     }
 
-    /** Shared row → map conversion used by find/list. */
     private static Map<String, Object> rowToMap(ResultSet rs) throws SQLException {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("idTransaccion", rs.getString("id_transaccion"));
@@ -244,18 +227,21 @@ public final class TransactionDao {
         row.put("numeroTarjeta", rs.getString("numero_tarjeta"));
         row.put("tarjetahabiente", rs.getString("tarjetahabiente"));
         row.put("aplicacionTarjeta", rs.getString("aplicacion_tarjeta"));
+        row.put("idAplicacionTarjeta", getNullableString(rs, "id_aplicacion_tarjeta"));
+        row.put("criptogramaTarjeta", getNullableString(rs, "criptograma_tarjeta"));
         row.put("modoLectura", rs.getString("modo_lectura"));
         row.put("codigoRespuesta", rs.getString("codigo_respuesta"));
         row.put("leyenda", rs.getString("leyenda"));
         row.put("firma", rs.getString("firma"));
         row.put("serieTerminal", rs.getString("serie_terminal"));
         row.put("numeroTerminal", rs.getString("numero_terminal"));
-        row.put("anulada", rs.getInt("anulada") == 1);
-        // Campos agregados 2026-09-02 para voucher-desde-SDK. En rows
-        // pre-migración vienen null, el formatter los omite si no están.
         row.put("razonSocial", getNullableString(rs, "razon_social"));
-        row.put("idAplicacionTarjeta", getNullableString(rs, "id_aplicacion_tarjeta"));
-        row.put("criptogramaTarjeta", getNullableString(rs, "criptograma_tarjeta"));
+        row.put("direccion", getNullableString(rs, "direccion"));
+        row.put("cuotas", getNullableString(rs, "cuotas"));
+        row.put("codigoPromocion", getNullableString(rs, "codigo_promocion"));
+        row.put("montoCuota", getNullableString(rs, "monto_cuota"));
+        row.put("mensajesPromocion", getNullableString(rs, "mensajes_promocion"));
+        row.put("anulada", rs.getInt("anulada") == 1);
         return row;
     }
 

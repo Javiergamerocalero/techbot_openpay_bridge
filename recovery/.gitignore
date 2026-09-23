@@ -1,0 +1,7 @@
+# Artefactos de compilacion y empaquetado del modulo recovery.
+# El jar y el ZIP se generan con `mvn clean package` y build-package.ps1,
+# no se versionan.
+target/
+dist/
+recovery.properties
+*.log

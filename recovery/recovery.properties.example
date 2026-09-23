@@ -1,0 +1,37 @@
+# TECHBOT Openpay Recovery Service
+# Copiar a C:\bridge\recovery\recovery.properties antes de instalar.
+
+# Escucha en la red local para que el kiosco Android alcance la mini-PC.
+# Restringir el puerto 9092 en el Firewall de Windows a la IP/subred del kiosco.
+# Si el kiosco corre en la misma maquina, usar 127.0.0.1 y no abrir nada.
+bindAddress=0.0.0.0
+port=9092
+
+# Clave obligatoria. Al menos 24 caracteres aleatorios.
+# Se envia en la cabecera X-Techbot-Recovery-Key para /openpay/status y
+# /openpay/recover. El servicio NO ARRANCA si se deja CHANGE_ME.
+apiKey=CHANGE_ME
+
+# Endpoint de salud del TotalPOS Bridge. Solo se admiten direcciones de la
+# propia maquina: apuntar a otro equipo hace que el servicio no arranque.
+bridgeHealthUrl=http://127.0.0.1:9091/api/health
+
+# El servicio Windows que se reinicia es siempre TotalPosBridge y va fijo en
+# el codigo a proposito. No es configurable: si lo fuera, quien pudiera editar
+# este archivo podria reiniciar cualquier servicio de la maquina.
+
+# Valores conservadores para un entorno local.
+bridgeConnectTimeoutMs=1500
+bridgeReadTimeoutMs=3000
+
+# Segundos minimos entre intentos de reinicio, tambien cuando el anterior
+# fallo. Evita que un Bridge roto entre en bucle de reinicios.
+restartCooldownSeconds=120
+
+# Cuanto se espera a que el Bridge vuelva a estar sano despues del reinicio.
+recoveryWaitSeconds=30
+healthPollIntervalMs=1000
+
+commandTimeoutSeconds=10
+serviceStopWaitSeconds=10
+serviceStartWaitSeconds=15
