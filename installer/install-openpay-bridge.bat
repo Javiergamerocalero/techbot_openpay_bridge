@@ -31,7 +31,8 @@ if not defined NSSM goto :err_nssm
 
 REM Persistir NSSM antes de registrar servicios. Los wrappers deben depender
 REM solo de C:\bridge y no de Descargas, USB u otra carpeta temporal.
-if /I not "%NSSM%"=="%STABLE_NSSM%" (
+if not exist "%STABLE_NSSM%" (
+    if /I "%NSSM%"=="%STABLE_NSSM%" goto :err_copy_nssm
     copy /Y "%NSSM%" "%STABLE_NSSM%" >nul
     if %ERRORLEVEL% neq 0 goto :err_copy_nssm
 )
