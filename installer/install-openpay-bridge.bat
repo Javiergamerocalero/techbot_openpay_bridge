@@ -113,7 +113,7 @@ if %ERRORLEVEL% neq 0 goto :err_install_bridge
 "%NSSM%" set %BRIDGE_SERVICE% AppStderr "%ROOT%\service.err.log"
 "%NSSM%" set %BRIDGE_SERVICE% AppRotateFiles 1
 "%NSSM%" set %BRIDGE_SERVICE% AppRotateBytes 10485760
-"%NSSM%" set %BRIDGE_SERVICE% AppRestartDelay 5000
+"%NSSM%" set %BRIDGE_SERVICE% AppExit Default Restart\n"%NSSM%" set %BRIDGE_SERVICE% AppRestartDelay 5000
 "%NSSM%" set %BRIDGE_SERVICE% AppThrottle 60000
 "%NSSM%" set %BRIDGE_SERVICE% AppStopMethodConsole 5000
 
@@ -127,7 +127,7 @@ if %ERRORLEVEL% neq 0 goto :err_install_recovery
 "%NSSM%" set %RECOVERY_SERVICE% AppStderr "%RECOVERY_DIR%\recovery.err.log"
 "%NSSM%" set %RECOVERY_SERVICE% AppRotateFiles 1
 "%NSSM%" set %RECOVERY_SERVICE% AppRotateBytes 5242880
-"%NSSM%" set %RECOVERY_SERVICE% AppRestartDelay 5000
+"%NSSM%" set %RECOVERY_SERVICE% AppExit Default Restart\n"%NSSM%" set %RECOVERY_SERVICE% AppRestartDelay 5000
 "%NSSM%" set %RECOVERY_SERVICE% AppThrottle 60000
 "%NSSM%" set %RECOVERY_SERVICE% AppStopMethodConsole 5000
 
