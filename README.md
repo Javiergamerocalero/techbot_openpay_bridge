@@ -3,8 +3,8 @@
 Bridge REST para el **BBVA TotalPOS Java SDK 1.1.13**, diseñado para ejecutarse en una mini-PC Windows junto al PinPad Openpay/TotalPOS y ser consumido por aplicaciones Android a través de la LAN.
 
 **Versión actual del Bridge:** 1.2.0  
-**Recovery Service:** 1.0.2  
-**Paquete de instalación Windows:** 1.0.2
+**Recovery Service:** 1.0.3  
+**Paquete piloto Windows:** `pilot-1.2.0-r1.0.3`
 
 El SDK TotalPOS se mantiene dentro de una JVM en Windows. El Bridge inicializa y conserva la instancia del SDK y expone por HTTP/JSON las operaciones necesarias para pagos, anulaciones, QR, cierre de turno, carga de llaves, consultas, reportes, vouchers y diagnóstico.
 
@@ -132,7 +132,7 @@ Ejemplo:
 }
 ```
 
-## Recovery Service 1.0.2
+## Recovery Service 1.0.3
 
 Servicio Windows independiente en el puerto `9092`.
 
@@ -152,7 +152,9 @@ X-Techbot-Recovery-Key
 
 Recovery considera saludable al Bridge solamente cuando `/api/health` devuelve HTTP 200, `status=OK` y `sdkInitialized=true`.
 
-La recuperación es **reactiva/on-demand**, no un watchdog periódico. Incluye exclusión mutua para impedir recuperaciones concurrentes, cooldown y verificación funcional posterior al reinicio.
+La recuperación normal es **reactiva/on-demand**, no un watchdog periódico. Incluye exclusión mutua para impedir recuperaciones concurrentes, cooldown y verificación funcional posterior al reinicio.
+
+La versión 1.0.3 incorpora además un **startup self-check de una sola ejecución**. Después de iniciar el servicio espera el período de gracia configurado (`startupGraceSeconds`, actualmente 60 s), comprueba la salud del Bridge y solo intenta recuperación si el Bridge no está saludable. No realiza sondeo periódico.
 
 Recovery no debe utilizarse para reiniciar el Bridge ante rechazos comerciales o errores arbitrarios de pago.
 
@@ -334,7 +336,8 @@ La actualización:
 - utiliza NSSM persistente en `C:\bridge\nssm.exe`;
 - reinstala/configura los wrappers sin duplicarlos;
 - inicia primero Bridge y después Recovery;
-- valida ambos health endpoints;
+- espera la transición de los servicios Windows desde `StartPending` hasta `Running` antes de declarar error;
+- valida ambos health endpoints y las versiones esperadas;
 - soporta actualización ejecutada incluso desde `C:\bridge`.
 
 ### Desinstalación
@@ -358,25 +361,55 @@ target/totalpos-bridge.jar
 El paquete Windows se genera mediante:
 
 ```powershell
-.\installer\build-package.ps1 -Version 1.0.2
+.\installer\build-package.ps1 -Version pilot-1.2.0-r1.0.3
 ```
 
 GitHub Actions genera además el ZIP y su SHA-256.
 
-## Validación realizada
+## Estado del piloto y validación realizada
 
-El paquete 1.0.2 y Bridge 1.2.0 fueron validados en Windows con:
+El paquete piloto `pilot-1.2.0-r1.0.3`, con Bridge 1.2.0 y Recovery 1.0.3, ha sido validado en laboratorio y en una NUC de producción.
 
-- instalación limpia;
-- arranque automático después de reiniciar Windows;
-- actualización sobre instalación existente;
-- preservación de configuraciones;
-- NSSM persistente en `C:\bridge\nssm.exe`;
-- funcionamiento después de retirar la carpeta fuente del instalador;
-- actualización in-place desde `C:\bridge`;
-- recuperación de un Bridge detenido mediante Recovery;
-- comprobación de integridad de artefactos y binarios instalados;
-- inicialización del SDK y comunicación con PinPad.
+Validaciones completadas:
+
+- instalación y migración desde Bridge 1.1.9 preservando la configuración existente;
+- servicios `TotalPosBridge` y `TechbotOpenpayRecovery` en modo `Automatic`;
+- Bridge 1.2.0 con SDK inicializado correctamente;
+- Recovery 1.0.3 operativo en el puerto 9092;
+- coexistencia con el servicio Izipay en el puerto 9090;
+- política NSSM `Restart`, `AppRestartDelay=5000` y `AppThrottle=60000`;
+- recuperación automática por NSSM ante caída del proceso Java del Bridge;
+- recuperación controlada mediante Recovery cuando el servicio Bridge está detenido;
+- startup self-check después del período de gracia, sin reinicio cuando el Bridge ya está saludable;
+- preservación del JAR anterior como `C:\bridge\totalpos-bridge.previous.jar`;
+- validación remota de `/api/health`, `/health` y `/openpay/status`;
+- generación correcta del paquete mediante GitHub Actions.
+
+Durante el piloto se corrigió el verificador del instalador para tolerar la transición normal de Windows `StartPending -> Running`. El verificador espera ahora a que ambos servicios alcancen `Running` antes de continuar con las comprobaciones de health, versión y puertos.
+
+### Validación pendiente antes de cerrar el piloto
+
+Permanece pendiente una prueba física end-to-end en la NUC de producción:
+
+1. realizar una transacción real con el PinPad A35;
+2. provocar un corte abrupto de energía de la NUC;
+3. encender nuevamente sin intervención manual sobre los servicios;
+4. esperar el arranque y el startup self-check;
+5. comprobar que Bridge y Recovery estén saludables;
+6. realizar una nueva transacción real con el A35.
+
+Hasta completar satisfactoriamente esta prueba, el paquete se mantiene como **piloto** y no se considera cerrada la validación de producción.
+
+### Build piloto vigente
+
+El build vigente fue generado desde la rama `pilot/openpay-bridge-1.2.0-recovery-1.0.3` e incorpora las correcciones detectadas durante el piloto.
+
+- Bridge: **1.2.0**
+- Recovery: **1.0.3**
+- Build GitHub Actions: **#20**
+- Commit: `13f2b5fcea031d9f54404a2b9b0ac794b3b5857c`
+- Artifact: `TECHBOT-Openpay-Bridge-pilot-1.2.0-r1.0.3`
+- SHA-256 del artifact: `89947fda8b7138d2c918b42f72ec8707f171fd53f34a221694228e4c3286aaa6`
 
 ## Seguridad operativa
 

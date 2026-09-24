@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - feature/openpay-recovery-service-v1
-      - feature/recovery-startup-selfcheck-v1
+      - feature/recovery-startup-selfcheck-v1\n      - pilot/openpay-bridge-1.2.0-recovery-1.0.3
     paths:
       - 'pom.xml'
       - 'src/**'
@@ -53,17 +53,17 @@ jobs:
           }
           if (-not $nssm) { throw 'No se encontro el binario real de NSSM instalado por Chocolatey.' }
           Write-Host "NSSM real seleccionado: $nssm"
-          .\installer\build-package.ps1 -Version 1.0.2 -NssmPath $nssm
+          .\installer\build-package.ps1 -Version pilot-1.2.0-r1.0.3 -NssmPath $nssm
 
       - name: Show package hash
         shell: powershell
-        run: Get-Content .\dist\TECHBOT-Openpay-Bridge-1.0.2.zip.sha256.txt
+        run: Get-Content .\dist\TECHBOT-Openpay-Bridge-pilot-1.2.0-r1.0.3.zip.sha256.txt
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TECHBOT-Openpay-Bridge-1.0.2
+          name: TECHBOT-Openpay-Bridge-pilot-1.2.0-r1.0.3
           path: |
-            dist/TECHBOT-Openpay-Bridge-1.0.2.zip
-            dist/TECHBOT-Openpay-Bridge-1.0.2.zip.sha256.txt
+            dist/TECHBOT-Openpay-Bridge-pilot-1.2.0-r1.0.3.zip
+            dist/TECHBOT-Openpay-Bridge-pilot-1.2.0-r1.0.3.zip.sha256.txt
           if-no-files-found: error

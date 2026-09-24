@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "pilot-1.2.0-r1.0.3",
     [string]$NssmPath = "",
     [switch]$SkipBuild
 )
@@ -73,6 +73,7 @@ $UpdateBat = Join-Path $InstallerDir "update-openpay-bridge.bat"
 $UninstallBat = Join-Path $InstallerDir "uninstall-openpay-bridge.bat"
 $VerifyPs1 = Join-Path $InstallerDir "verify-installation.ps1"
 $Readme = Join-Path $InstallerDir "README.md"
+$PilotReadme = Join-Path $InstallerDir "PILOT.md"
 
 Require-File $BridgeJar "TotalPosBridge JAR"
 Require-File $RecoveryJar "Recovery JAR"
@@ -83,6 +84,7 @@ Require-File $UpdateBat "update-openpay-bridge.bat"
 Require-File $UninstallBat "uninstall-openpay-bridge.bat"
 Require-File $VerifyPs1 "verify-installation.ps1"
 Require-File $Readme "README.md"
+Require-File $PilotReadme "PILOT.md"
 
 Write-Host "[3/6] Resolviendo NSSM..."
 $ResolvedNssm = Resolve-Nssm $NssmPath
@@ -101,6 +103,7 @@ Copy-Item $UpdateBat $StageDir
 Copy-Item $UninstallBat $StageDir
 Copy-Item $VerifyPs1 $StageDir
 Copy-Item $Readme $StageDir
+Copy-Item $PilotReadme $StageDir
 Copy-Item $ResolvedNssm (Join-Path $StageDir "nssm.exe")
 
 $Manifest = @"

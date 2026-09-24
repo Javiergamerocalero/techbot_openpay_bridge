@@ -113,6 +113,7 @@ if %ERRORLEVEL% neq 0 goto :err_install_bridge
 "%NSSM%" set %BRIDGE_SERVICE% AppStderr "%ROOT%\service.err.log"
 "%NSSM%" set %BRIDGE_SERVICE% AppRotateFiles 1
 "%NSSM%" set %BRIDGE_SERVICE% AppRotateBytes 10485760
+"%NSSM%" set %BRIDGE_SERVICE% AppExit Default Restart
 "%NSSM%" set %BRIDGE_SERVICE% AppRestartDelay 5000
 "%NSSM%" set %BRIDGE_SERVICE% AppThrottle 60000
 "%NSSM%" set %BRIDGE_SERVICE% AppStopMethodConsole 5000
@@ -127,11 +128,12 @@ if %ERRORLEVEL% neq 0 goto :err_install_recovery
 "%NSSM%" set %RECOVERY_SERVICE% AppStderr "%RECOVERY_DIR%\recovery.err.log"
 "%NSSM%" set %RECOVERY_SERVICE% AppRotateFiles 1
 "%NSSM%" set %RECOVERY_SERVICE% AppRotateBytes 5242880
+"%NSSM%" set %RECOVERY_SERVICE% AppExit Default Restart
 "%NSSM%" set %RECOVERY_SERVICE% AppRestartDelay 5000
 "%NSSM%" set %RECOVERY_SERVICE% AppThrottle 60000
 "%NSSM%" set %RECOVERY_SERVICE% AppStopMethodConsole 5000
 
-REM No abrir 9092 globalmente. Firewall se restringira por IP/subred del kiosco.
+REM El instalador piloto no crea ni modifica reglas de Windows Firewall.
 "%NSSM%" start %BRIDGE_SERVICE%
 timeout /t 2 /nobreak >nul
 "%NSSM%" start %RECOVERY_SERVICE%
@@ -149,7 +151,7 @@ echo Binarios previos, si existian:
 echo   %ROOT%\totalpos-bridge.previous.jar
 echo   %RECOVERY_DIR%\openpay-recovery-service.previous.jar
 echo.
-echo NOTA: antes de produccion, restringir TCP 9092 a la IP/subred del kiosco.
+echo Firewall: sin cambios por este instalador piloto.
 endlocal
 exit /b 0
 
