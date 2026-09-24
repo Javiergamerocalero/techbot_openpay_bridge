@@ -72,7 +72,7 @@ $InstallBat = Join-Path $InstallerDir "install-openpay-bridge.bat"
 $UpdateBat = Join-Path $InstallerDir "update-openpay-bridge.bat"
 $UninstallBat = Join-Path $InstallerDir "uninstall-openpay-bridge.bat"
 $VerifyPs1 = Join-Path $InstallerDir "verify-installation.ps1"
-$Readme = Join-Path $InstallerDir "README.md"
+$Readme = Join-Path $InstallerDir "README.md"\n$PilotReadme = Join-Path $InstallerDir "PILOT.md"
 
 Require-File $BridgeJar "TotalPosBridge JAR"
 Require-File $RecoveryJar "Recovery JAR"
@@ -82,7 +82,7 @@ Require-File $InstallBat "install-openpay-bridge.bat"
 Require-File $UpdateBat "update-openpay-bridge.bat"
 Require-File $UninstallBat "uninstall-openpay-bridge.bat"
 Require-File $VerifyPs1 "verify-installation.ps1"
-Require-File $Readme "README.md"
+Require-File $Readme "README.md"\nRequire-File $PilotReadme "PILOT.md"
 
 Write-Host "[3/6] Resolviendo NSSM..."
 $ResolvedNssm = Resolve-Nssm $NssmPath
@@ -100,7 +100,7 @@ Copy-Item $InstallBat $StageDir
 Copy-Item $UpdateBat $StageDir
 Copy-Item $UninstallBat $StageDir
 Copy-Item $VerifyPs1 $StageDir
-Copy-Item $Readme $StageDir
+Copy-Item $Readme $StageDir\nCopy-Item $PilotReadme $StageDir
 Copy-Item $ResolvedNssm (Join-Path $StageDir "nssm.exe")
 
 $Manifest = @"
