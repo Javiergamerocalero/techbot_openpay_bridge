@@ -37,7 +37,11 @@ serviceStopWaitSeconds=10
 serviceStartWaitSeconds=15
 
 # Autorecuperacion unica al arrancar Recovery. No es un watchdog periodico.
-# Tras el periodo de gracia, Recovery comprueba una sola vez /api/health.
-# Si Bridge sigue no saludable, ejecuta un unico intento de recuperacion.
+# Durante el periodo de gracia Recovery sondea /api/health y corta en cuanto
+# el Bridge esta sano; solo si NUNCA levanta ejecuta un unico intento de
+# recuperacion, y ese intento respeta el mismo enfriamiento de abajo.
+# Como el sondeo corta apenas levanta, una ventana amplia no retrasa nada
+# cuando el arranque fue normal: hay que dimensionarla con lo que tarda el
+# arranque en frio mas lento de la mini-PC, no con el mas rapido.
 startupSelfCheckEnabled=true
-startupGraceSeconds=60
+startupGraceSeconds=180

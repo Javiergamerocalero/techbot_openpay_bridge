@@ -98,14 +98,16 @@ public final class RecoveryMain {
         }
         Thread worker = new Thread(() -> {
             try {
-                log("INFO", "Startup self-check scheduled in " + config.startupGraceSeconds + "s");
-                TimeUnit.SECONDS.sleep(config.startupGraceSeconds);
-                BridgeHealth health = checkBridgeHealth();
+                log("INFO", "Startup self-check: waiting up to "
+                        + config.startupGraceSeconds + "s for the Bridge to come up");
+                BridgeHealth health = awaitBridgeStartup();
                 if (health.healthy) {
-                    log("INFO", "Startup self-check: Bridge already healthy; no action required");
+                    log("INFO", "Startup self-check: Bridge healthy; no action required");
                     return;
                 }
-                log("WARN", "Startup self-check: Bridge unhealthy; attempting one controlled recovery. reason=" + health.reason);
+                log("WARN", "Startup self-check: Bridge did not come up within "
+                        + config.startupGraceSeconds + "s; attempting one controlled recovery. reason="
+                        + health.reason);
                 performStartupRecovery();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -118,6 +120,26 @@ public final class RecoveryMain {
         worker.start();
     }
 
+    /**
+     * Waits for the Bridge to come up, polling until the grace period ends and
+     * returning as soon as it is healthy. Polling instead of sleeping blindly
+     * matters on a cold boot: the SDK/PinPad initialisation can take longer
+     * than the window on one machine and less on another, and restarting a
+     * Bridge that is still initialising hits it at the worst possible moment.
+     * Because it returns early, a generous window costs nothing when the boot
+     * was normal.
+     */
+    private BridgeHealth awaitBridgeStartup() throws InterruptedException {
+        long deadline = System.currentTimeMillis()
+                + TimeUnit.SECONDS.toMillis(config.startupGraceSeconds);
+        BridgeHealth last = checkBridgeHealth();
+        while (!last.healthy && System.currentTimeMillis() < deadline) {
+            TimeUnit.MILLISECONDS.sleep(config.healthPollIntervalMs);
+            last = checkBridgeHealth();
+        }
+        return last;
+    }
+
     private void performStartupRecovery() {
         if (!recoveryInProgress.compareAndSet(false, true)) {
             log("WARN", "Startup self-check skipped: another recovery is already in progress");
@@ -128,6 +150,16 @@ public final class RecoveryMain {
             BridgeHealth before = checkBridgeHealth();
             if (before.healthy) {
                 log("INFO", "Startup recovery skipped: Bridge became healthy");
+                return;
+            }
+            // Mismo enfriamiento que la ruta bajo demanda: si el quiosco ya
+            // pidio recuperacion durante la ventana de gracia, el arranque no
+            // puede reiniciar otra vez encima de ese intento.
+            long now = System.currentTimeMillis();
+            if (cooldownActive(lastRestartEpochMs.get(), now, config.restartCooldownSeconds)) {
+                log("WARN", "Startup recovery skipped: restart cooldown active ("
+                        + cooldownRemainingSeconds(lastRestartEpochMs.get(), now,
+                                config.restartCooldownSeconds) + "s remaining)");
                 return;
             }
             lastRestartEpochMs.set(System.currentTimeMillis());
@@ -202,10 +234,11 @@ public final class RecoveryMain {
                     return;
                 }
 
+                long now = System.currentTimeMillis();
                 long lastRestart = lastRestartEpochMs.get();
-                long cooldownMs = TimeUnit.SECONDS.toMillis(config.restartCooldownSeconds);
-                if (lastRestart > 0 && System.currentTimeMillis() - lastRestart < cooldownMs) {
-                    long remaining = Math.max(1, (cooldownMs - (System.currentTimeMillis() - lastRestart)) / 1000);
+                if (cooldownActive(lastRestart, now, config.restartCooldownSeconds)) {
+                    long remaining = cooldownRemainingSeconds(lastRestart, now,
+                            config.restartCooldownSeconds);
                     json(exchange, 429,
                             before.toJson(true, false, "restart_cooldown_" + remaining + "s"));
                     return;
@@ -242,6 +275,20 @@ public final class RecoveryMain {
                 recoveryInProgress.set(false);
             }
         }
+    }
+
+    /** True while another restart must not be attempted yet. */
+    static boolean cooldownActive(long lastRestartEpochMs, long nowMs, int cooldownSeconds) {
+        if (lastRestartEpochMs <= 0) {
+            return false;
+        }
+        return nowMs - lastRestartEpochMs < TimeUnit.SECONDS.toMillis(cooldownSeconds);
+    }
+
+    /** Whole seconds left in the cooldown; at least 1 while it is active. */
+    static long cooldownRemainingSeconds(long lastRestartEpochMs, long nowMs, int cooldownSeconds) {
+        long cooldownMs = TimeUnit.SECONDS.toMillis(cooldownSeconds);
+        return Math.max(1, (cooldownMs - (nowMs - lastRestartEpochMs)) / 1000);
     }
 
     private boolean authorized(HttpExchange exchange) {
