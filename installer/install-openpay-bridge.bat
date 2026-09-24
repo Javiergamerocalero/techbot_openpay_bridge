@@ -15,16 +15,14 @@ set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
 set "NEEDS_CONFIG=0"
 set "PACKAGE_DIR=%~dp0"
-set "STABLE_NSSM=%ROOT%
-ssm.exe"
+set "STABLE_NSSM=%ROOT%\nssm.exe"
 
 REM Resolver NSSM sin usar "nssm version" como prueba de exito.
 REM NSSM 2.24 muestra la version/ayuda pero puede devolver ERRORLEVEL distinto de 0,
 REM lo que producia falsos negativos con un binario perfectamente valido.
 set "NSSM=%PACKAGE_DIR%nssm.exe"
 if exist "%NSSM%" goto :nssm_ready
-set "NSSM=%ROOT%
-ssm.exe"
+set "NSSM=%ROOT%\nssm.exe"
 if exist "%NSSM%" goto :nssm_ready
 set "NSSM="
 for /f "delims=" %%i in ('where nssm.exe 2^>nul') do if not defined NSSM set "NSSM=%%i"
