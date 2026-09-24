@@ -27,8 +27,7 @@ function Resolve-Nssm([string]$ExplicitPath) {
 
     $Candidates = @(
         (Join-Path $InstallerDir "nssm.exe"),
-        "C:\bridge
-ssm.exe"
+        "C:\bridge\nssm.exe"
     )
 
     foreach ($Candidate in $Candidates) {
