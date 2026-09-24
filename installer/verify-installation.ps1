@@ -6,7 +6,20 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$BridgeUrl = "http://127.0.0.1:9091/api/health"
+$RecoveryConfig = "C:\bridge\recovery\recovery.properties"
+if (-not (Test-Path $RecoveryConfig)) { throw "No existe $RecoveryConfig." }
+
+$bridgeHealthLine = Get-Content $RecoveryConfig |
+    Where-Object { $_ -match '^\s*bridgeHealthUrl\s*=' } |
+    Select-Object -First 1
+if (-not $bridgeHealthLine) { throw "No se encontro bridgeHealthUrl en $RecoveryConfig." }
+
+$BridgeUrl = ($bridgeHealthLine -split '=', 2)[1].Trim()
+try { $BridgeUri = [Uri]$BridgeUrl } catch { throw "bridgeHealthUrl invalida: $BridgeUrl" }
+if ($BridgeUri.Scheme -ne "http" -or $BridgeUri.Host -notin @("127.0.0.1","localhost") -or $BridgeUri.Port -le 0) {
+    throw "bridgeHealthUrl no es local/valida: $BridgeUrl"
+}
+$BridgePort = $BridgeUri.Port
 $RecoveryUrl = "http://127.0.0.1:9092/health"
 
 function Wait-JsonHealth([string]$Name, [string]$Url, [int]$TimeoutSeconds) {
@@ -65,10 +78,10 @@ if ($recovery.version -ne $ExpectedRecoveryVersion) {
 
 Write-Host "=== PUERTOS ==="
 $ports = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-    Where-Object { $_.LocalPort -in 9091,9092 } |
+    Where-Object { $_.LocalPort -in $BridgePort,9092 } |
     Select-Object LocalAddress,LocalPort,OwningProcess
 $ports | Format-Table -AutoSize
-if (-not ($ports | Where-Object LocalPort -eq 9091)) { throw "Puerto 9091 no esta escuchando." }
+if (-not ($ports | Where-Object LocalPort -eq $BridgePort)) { throw "Puerto Bridge $BridgePort no esta escuchando." }
 if (-not ($ports | Where-Object LocalPort -eq 9092)) { throw "Puerto 9092 no esta escuchando." }
 
 Write-Host "INSTALLATION_HEALTH=OK"
