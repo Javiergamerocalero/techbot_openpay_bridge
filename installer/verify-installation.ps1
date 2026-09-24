@@ -1,46 +1,63 @@
 param(
     [int]$TimeoutSeconds = 35,
-    [int]$PollMilliseconds = 1000
+    [int]$PollMilliseconds = 1000,
+    [string]$ExpectedBridgeVersion = "1.2.0",
+    [string]$ExpectedRecoveryVersion = "1.0.3"
 )
 
 $ErrorActionPreference = "Stop"
 $BridgeUrl = "http://127.0.0.1:9091/api/health"
 $RecoveryUrl = "http://127.0.0.1:9092/health"
 
-function Wait-Http200([string]$Name, [string]$Url, [int]$TimeoutSeconds) {
+function Wait-JsonHealth([string]$Name, [string]$Url, [int]$TimeoutSeconds) {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $lastError = $null
-
     while ([DateTime]::UtcNow -lt $deadline) {
         try {
-            $r = Invoke-WebRequest -UseBasicParsing -Uri $Url -Method GET -TimeoutSec 5
-            if ([int]$r.StatusCode -eq 200) {
-                Write-Host "$Name OK: HTTP 200"
-                Write-Host $r.Content
-                return $true
-            }
-            $lastError = "HTTP $([int]$r.StatusCode)"
-        }
-        catch {
+            $r = Invoke-RestMethod -Uri $Url -Method GET -TimeoutSec 5
+            return $r
+        } catch {
             $lastError = $_.Exception.Message
         }
         Start-Sleep -Milliseconds $PollMilliseconds
     }
-
-    Write-Host "$Name FAIL: $lastError"
-    return $false
+    throw "$Name FAIL: $lastError"
 }
 
-Write-Host "Verificando TotalPosBridge..."
-$bridgeOk = Wait-Http200 "TotalPosBridge" $BridgeUrl $TimeoutSeconds
+Write-Host "=== SERVICIOS ==="
+$bridgeService = Get-Service TotalPosBridge -ErrorAction Stop
+$recoveryService = Get-Service TechbotOpenpayRecovery -ErrorAction Stop
+$bridgeService, $recoveryService | Select-Object Name,Status,StartType | Format-Table -AutoSize
 
-Write-Host "Verificando TechbotOpenpayRecovery..."
-$recoveryOk = Wait-Http200 "TechbotOpenpayRecovery" $RecoveryUrl 10
+if ($bridgeService.Status -ne "Running") { throw "TotalPosBridge no esta Running." }
+if ($recoveryService.Status -ne "Running") { throw "TechbotOpenpayRecovery no esta Running." }
+if ($bridgeService.StartType -ne "Automatic") { throw "TotalPosBridge no esta Automatic." }
+if ($recoveryService.StartType -ne "Automatic") { throw "TechbotOpenpayRecovery no esta Automatic." }
 
-if ($bridgeOk -and $recoveryOk) {
-    Write-Host "INSTALLATION_HEALTH=OK"
-    exit 0
+Write-Host "=== HEALTH BRIDGE ==="
+$bridge = Wait-JsonHealth "TotalPosBridge" $BridgeUrl $TimeoutSeconds
+$bridge | Format-List
+if ($bridge.status -ne "OK") { throw "Bridge status distinto de OK." }
+if ($bridge.sdkInitialized -ne $true) { throw "Bridge SDK no inicializado." }
+if ($bridge.bridgeVersion -ne $ExpectedBridgeVersion) {
+    throw "Version Bridge inesperada: $($bridge.bridgeVersion); esperada $ExpectedBridgeVersion."
 }
 
-Write-Host "INSTALLATION_HEALTH=FAIL"
-exit 1
+Write-Host "=== HEALTH RECOVERY ==="
+$recovery = Wait-JsonHealth "TechbotOpenpayRecovery" $RecoveryUrl 10
+$recovery | Format-List
+if ($recovery.ok -ne $true) { throw "Recovery health no es OK." }
+if ($recovery.version -ne $ExpectedRecoveryVersion) {
+    throw "Version Recovery inesperada: $($recovery.version); esperada $ExpectedRecoveryVersion."
+}
+
+Write-Host "=== PUERTOS ==="
+$ports = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+    Where-Object { $_.LocalPort -in 9091,9092 } |
+    Select-Object LocalAddress,LocalPort,OwningProcess
+$ports | Format-Table -AutoSize
+if (-not ($ports | Where-Object LocalPort -eq 9091)) { throw "Puerto 9091 no esta escuchando." }
+if (-not ($ports | Where-Object LocalPort -eq 9092)) { throw "Puerto 9092 no esta escuchando." }
+
+Write-Host "INSTALLATION_HEALTH=OK"
+exit 0
