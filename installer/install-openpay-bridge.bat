@@ -15,14 +15,16 @@ set "BRIDGE_SERVICE=TotalPosBridge"
 set "RECOVERY_SERVICE=TechbotOpenpayRecovery"
 set "NEEDS_CONFIG=0"
 set "PACKAGE_DIR=%~dp0"
-set "STABLE_NSSM=%ROOT%\nssm.exe"
+set "STABLE_NSSM=%ROOT%
+ssm.exe"
 
 REM Resolver NSSM sin usar "nssm version" como prueba de exito.
 REM NSSM 2.24 muestra la version/ayuda pero puede devolver ERRORLEVEL distinto de 0,
 REM lo que producia falsos negativos con un binario perfectamente valido.
 set "NSSM=%PACKAGE_DIR%nssm.exe"
 if exist "%NSSM%" goto :nssm_ready
-set "NSSM=%ROOT%\nssm.exe"
+set "NSSM=%ROOT%
+ssm.exe"
 if exist "%NSSM%" goto :nssm_ready
 set "NSSM="
 for /f "delims=" %%i in ('where nssm.exe 2^>nul') do if not defined NSSM set "NSSM=%%i"
@@ -113,7 +115,8 @@ if %ERRORLEVEL% neq 0 goto :err_install_bridge
 "%NSSM%" set %BRIDGE_SERVICE% AppStderr "%ROOT%\service.err.log"
 "%NSSM%" set %BRIDGE_SERVICE% AppRotateFiles 1
 "%NSSM%" set %BRIDGE_SERVICE% AppRotateBytes 10485760
-"%NSSM%" set %BRIDGE_SERVICE% AppExit Default Restart\n"%NSSM%" set %BRIDGE_SERVICE% AppRestartDelay 5000
+"%NSSM%" set %BRIDGE_SERVICE% AppExit Default Restart
+"%NSSM%" set %BRIDGE_SERVICE% AppRestartDelay 5000
 "%NSSM%" set %BRIDGE_SERVICE% AppThrottle 60000
 "%NSSM%" set %BRIDGE_SERVICE% AppStopMethodConsole 5000
 
@@ -127,7 +130,8 @@ if %ERRORLEVEL% neq 0 goto :err_install_recovery
 "%NSSM%" set %RECOVERY_SERVICE% AppStderr "%RECOVERY_DIR%\recovery.err.log"
 "%NSSM%" set %RECOVERY_SERVICE% AppRotateFiles 1
 "%NSSM%" set %RECOVERY_SERVICE% AppRotateBytes 5242880
-"%NSSM%" set %RECOVERY_SERVICE% AppExit Default Restart\n"%NSSM%" set %RECOVERY_SERVICE% AppRestartDelay 5000
+"%NSSM%" set %RECOVERY_SERVICE% AppExit Default Restart
+"%NSSM%" set %RECOVERY_SERVICE% AppRestartDelay 5000
 "%NSSM%" set %RECOVERY_SERVICE% AppThrottle 60000
 "%NSSM%" set %RECOVERY_SERVICE% AppStopMethodConsole 5000
 
