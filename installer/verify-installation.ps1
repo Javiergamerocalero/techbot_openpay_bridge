@@ -24,13 +24,25 @@ function Wait-JsonHealth([string]$Name, [string]$Url, [int]$TimeoutSeconds) {
     throw "$Name FAIL: $lastError"
 }
 
+function Wait-ServiceRunning([string]$Name, [int]$TimeoutSeconds) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastStatus = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $service = Get-Service $Name -ErrorAction Stop
+        $lastStatus = $service.Status
+        if ($service.Status -eq "Running") {
+            return $service
+        }
+        Start-Sleep -Milliseconds $PollMilliseconds
+    }
+    throw "$Name no alcanzo Running dentro de $TimeoutSeconds s. Ultimo estado: $lastStatus"
+}
+
 Write-Host "=== SERVICIOS ==="
-$bridgeService = Get-Service TotalPosBridge -ErrorAction Stop
-$recoveryService = Get-Service TechbotOpenpayRecovery -ErrorAction Stop
+$bridgeService = Wait-ServiceRunning "TotalPosBridge" $TimeoutSeconds
+$recoveryService = Wait-ServiceRunning "TechbotOpenpayRecovery" $TimeoutSeconds
 $bridgeService, $recoveryService | Select-Object Name,Status,StartType | Format-Table -AutoSize
 
-if ($bridgeService.Status -ne "Running") { throw "TotalPosBridge no esta Running." }
-if ($recoveryService.Status -ne "Running") { throw "TechbotOpenpayRecovery no esta Running." }
 if ($bridgeService.StartType -ne "Automatic") { throw "TotalPosBridge no esta Automatic." }
 if ($recoveryService.StartType -ne "Automatic") { throw "TechbotOpenpayRecovery no esta Automatic." }
 
