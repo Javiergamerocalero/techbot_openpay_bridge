@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version = "pilot-1.2.0-r1.0.3",
     [string]$NssmPath = "",
     [switch]$SkipBuild
 )
